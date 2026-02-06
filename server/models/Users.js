@@ -50,6 +50,12 @@ const userSchema=new mongoose.Schema({
     ref:'Team',
     default:NULL
    },
+   level: {
+  type: Number,
+  default: 1,
+  min:1
+ },
+leader: {
    isOnline:{
     type:Boolean,
     default:false
@@ -58,7 +64,7 @@ const userSchema=new mongoose.Schema({
     type:Date,
     default:Date.now
    }
-   },{
+   },
    timestamps:true           //it is a part of the object userSchmea
 });
 

@@ -1,9 +1,12 @@
-import express from 'express';
+import express from 'express';           //
 import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
+
+//importing routes
+import authRoutes from "../routes/authRoutes";
 
 // Load environment variables
 dotenv.config();

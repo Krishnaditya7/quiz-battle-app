@@ -9,7 +9,7 @@ const messageSchema = new mongoose.Schema({
   message: {
     type: String,
     required: true,
-    maxlength: 500
+    maxlength: 1000
   },
   timestamp: {
     type: Date,
@@ -26,11 +26,15 @@ const teamSchema = new mongoose.Schema({
     minlength: 3,
     maxlength: 30
   },
-  type: {
-    type: String,
-    enum: ['beginner', 'intermediate', 'advanced'],
-    default: 'beginner'
+  level: {
+    type: Number,
+default: 0,
+min:1
   },
+  rating: {
+    type: Number,
+    default: 0
+   },
   leader: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
