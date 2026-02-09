@@ -7,7 +7,7 @@ import { Server } from 'socket.io';
 
 //importing routes
 import authRoutes from "../routes/authRoutes";
-
+import teamRoutes from "../routes/teamRoutes";
 // Load environment variables
 dotenv.config();
 
@@ -34,6 +34,8 @@ app.get('/', (req, res) => {
   res.json({ message: '🎮 Quiz Battle API is running!' });
 });
 
+app.use('/api/auth',authRoutes);  //pehla
+
 app.get('/api/test', (req, res) => {
   res.json({ message: 'Backend API works!', status: 'success' });
 });
@@ -52,3 +54,5 @@ const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
+app.use('/api/teams',teamRoutes);   //dusra

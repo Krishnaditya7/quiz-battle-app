@@ -37,7 +37,7 @@ export const createTeam = async (req,res) => {
 //  play being with another team he should change his current team with the team he wants to play
         await User.findByIdAndUpdate(req.user._id, { 
             currentTeam: team._id,
-            $push: { teams: team }
+            $addToSet: { teams: team._id }   //push alllows duplicate but  add to set ensures uniqueness
         });
         const populatedTeam = await Team.findById(team._id).populate('leader members','username rating');
 
@@ -58,7 +58,7 @@ export const createTeam = async (req,res) => {
 // @desc Get available team to join
 // @route Get/api/teams/available
 // @access Private
-export const getAvailableTeam = async (req,res) => {
+export const getAvailableTeams = async (req,res) => {
     try{
         const { level } = req.query;
 
@@ -94,7 +94,12 @@ export const getAvailableTeam = async (req,res) => {
 export const joinTeam = async (req,res) => {
     try{
         const { teamId } = req.params;
-        
+        if(team.members.length >= team.maxMembers){
+    return res.status(400).json({
+        success: false,
+        message: 'team is full'
+    });
+   }
         // our current team can be same as what and when we want to play we will choose from 
         // which team should we play and THAT will become the current team
         await Team.findByIdAndUpdate(teamId, {
@@ -109,13 +114,7 @@ export const joinTeam = async (req,res) => {
              success: false,
              message: 'team not found'
         });
-    }
-    if(team.members.length >= team.maxMembers){
-        return res.status(400).json({
-            success: false,
-            message: 'team is full'
-        });
-    }
+      }
     const populatedTeam = await Team.findById(team._id).populate('leader members', 'username rating');
 
     res.status(200).json({
@@ -133,13 +132,277 @@ export const joinTeam = async (req,res) => {
   }
 };
 export const setCurrentTeam = async (req,res) => {
-    const { teamId }= req.body;
+    const { teamId }= req.params;
+     
+    const team = await Team.findById(teamId);
+    if (!team) {
+      return res.status(404).json({
+        success: false,
+        message: 'Team not found'
+      });
+    }
+    const user = await User.findById(req.user._id);
 
-    if(!teamId){
-        return res.status(400).json({
+    if(!user.teams.some(t => t.equals(teamId))) {
+        return res.status(403).json({
             success: false,
-            message: 'teamID is required'
+            message: 'You are not a member of this team'
         });
     }
-    const 
+    user.currentTeam = teamId;
+    await user.save();
+
+    res.json({
+        success: true,
+        message: 'current team set successfully',
+        data: {
+            currentTeam: teamId
+        }
+    });
+};
+// @desc Get my current team
+// @route GET/api/teams/my-team
+// @access Private
+export const getMyTeam = async (req,res) => {
+    try{
+        if(!req.user.currentTeam){
+            return res.status(404).json({
+                success: false,
+                message: 'You are not in team'
+            });
+        }
+        const team = await Team.findById(req.user.currentTeam).populate('leader members','username rating isOnline lastActive');
+
+        if(!team){
+            return res.status(404).json({
+                success: false,
+                message: 'team not found'
+            });
+        }
+        res.status(200).json({
+            success: true,
+            data: { team }
+        });
+    } catch(error){
+        console.error('get my team error:',error);
+        res.status(500).json({
+            success: false,
+            message: 'server error',
+            error: error.message
+        });
+    }
+};
+// @desc Leave team bro (permanently)
+// @route Post/api/teams/leave
+// @access Private
+export const leaveTeam = async (req,res) => {
+    try{
+        const { teamId }= req.user.currentTeam;
+
+        const team = await Team.findById(teamId);
+        if(!team){
+            return res.status(404).json({
+                succes:false,
+                message: 'Team not found'
+            });
+        }
+        if(!team.members.some(m=>m.equals(req.user._id))) {
+            return res.status(400).json({
+                success: false,
+                message: 'You are not a member of this team'
+            });
+        }
+        if(team.leader.equals(req.user._id)){
+            if(team.members.length > 1){
+                team.members = team.members.filter(m=> !m.equals(req.user._id));
+                team.leader = team.members[0];
+                await team.save();
+            } else{
+                await team.findByIdAndDelete(team._id);
+            }
+        } else{
+            team.members = team.members.filter(m=> !m.equals(req.user._id));
+            await team.save();
+        }
+        // updating the user
+        const user = await user.findById(req.user._id);
+        user.teams = user.teams.filter(t=>!t.equals(team._id));
+
+        if(user.currentTeam && user.currentTeam.equals(team._id)){
+            user.currentTeam=null;
+        }
+        await user.save();
+
+        res.json({
+            succes: true,
+            message: 'Left team successfully'
+        });
+    } catch (error){
+        console.error('error ocuured while leavind team :',error);
+        res.status(500).json({
+            success: false,
+            message: 'Server error'
+        });
+    }
+
+};
+
+// @route Post api/users/unset-current-team
+// @desc changing team in current team to play with other team
+// @access Private
+export const unsetCurrentTeam = async (req,res) => {
+    try{
+        req.user.currentTeam = null;
+        await req.user.save();
+
+        res.json({
+            success: true,
+            message: 'Current team unset'
+        })
+    } catch(error){
+        console.error('Error occured while changing the current team :',error);
+        res.status(500).json({
+            success: false,
+            message: 'server error'
+        });
+    }
+};
+// @desc team leadership transfer krna
+// @route Post/api/user/transferLeadership
+// @access Private
+
+export const transferLeadership = async (req,res) => {   //yeh ek request ho toh hai
+    try{
+    //  us member ka id lena bhi zaruri hai jisko banana hai team leader 
+        const { teamId } = req.params;
+        const { newLeaderId } = req.body;
+
+        if(!newLeaderId){
+            return res.status(400).json({
+                success: false,
+                message: 'Leader id is reuired'
+            });
+        }
+        const team = await Team.findById(teamId);
+        if(!team){
+            return res.status(404).json({
+               success: false,
+               message: 'Team not found' 
+        });
+    }
+    if(!team.leader.equals(req.user._id)){
+        return res.status(403).json({
+            success: false,
+            message: 'Only team leader can transfer the leadership'
+        });
+    }
+    if(!team.members.some(m=> m.equals(newLeaderId))){
+        return res.status(400).json({
+            success: false,
+            message: 'new team leader should first be in the the team'
+        });
+    }
+    if(team.leader.equals(newLeaderId)){
+        return res.status(400).json({
+            success: false,
+            message: 'user is already the leader'
+        });
+    }
+    team.leader = newLeaderId;
+    await team.save();
+
+    res.json({
+        success: true,
+        message: 'team leadership transferred successfully'
+    });
+} catch(error){
+    console.error('Transfer leadership error:', error);
+    res.status(500).json({
+    success: false,
+    message: 'Server error'
+});
 }
+};
+// @desc send message in the chat
+// @route POST/api/team/chat
+
+export const sendTeamMessage = async (req,res) => {
+    try{
+        const { message } = req.body;
+
+        if(!message || message.trim() === ''){
+            return res.status(400).json({
+                success: false,
+                message: 'message cannot be empty' 
+            });
+        }
+        if(!req.user.currentTeam) {
+            return res.status(400).json({
+                success: false,
+                message: 'User is not in the team'
+            });
+        }
+        const team = await Team.findById(req.user.currentTeam);
+        if(!team){
+            return res.status(404).json({
+                success: true,
+                message: 'Team not found'
+            });
+        }
+        // now let's add message to the chat
+        team.chat.push({
+            sender: req.user._id,
+            message: message.trim()
+        });
+        await team.save();
+
+        const populatedTeam = await Team.findById(team._id).populate('chat.sender','username');
+        res.status(200).json({
+            success: true,
+            data: {
+                message: populatedTeam.chat[populatedTeam.chat.length - 1]
+            }
+        });
+    } catch(error){
+        console.error('Send team message error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+    }
+};
+// @desc get team chat messages
+// @route get/api/teams/chat
+// @access Private
+
+export const getTeamChat = async (req,res) => {
+    try{
+        if(!req.user.currentTeam){
+            return res.status(400).json({
+                success: false,
+                message: 'you are not in any team'
+            });
+        }
+        const team = await Team.findById(req.user.currentTeam).populate('chat.sender','username');
+        if(!team){
+            return res.status(404).json({
+                success: false,
+                message: 'team not found'
+            });
+        }
+        res.status(200).json({
+            success: true,
+            data: {
+                message: team.chat
+            }
+        });
+    } catch(error){
+        console.error('Get team chat error:',error);
+        res.status(500).json({
+            success: false,
+            message: 'Server error',
+            error : error.message
+        });
+    }
+};
