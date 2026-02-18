@@ -12,14 +12,26 @@ const generateTurnSequence = (players) => {
     // assigning turn numbers (1,2,3,4)
     return shuffled.map((players,index) => ({
         ...players,
-        turnNumber: index+1
+        turnNumber:index+1
     }));
 };
+//distributing questions
+const distributeQuestionsPerPlayer = (game,totalQuestions,totalPlayer) => {
+    if(totalQuestions%totalPlayer==0){
+        return totalQuestions/totalPlayer;
+    }
+    if(player.user.toString() === leaderId.toString()){
+       return player.questionsRemaining += (totalQuestions % totalPlayer);
+    }
+};
 
-// ab dusre team ya bande ko chance do
-const getNextTurn = (game) => {
+
+export const getNextTurn = (game) => {
     // get all participants
-    const participants = [];
+    const teams = game.participants.teams;
+    const soloPlayers = game.participants.soloPlayers;
+
+    
 
     // add solo players 
     game.participants.soloPlayers.forEach(player => {
@@ -56,6 +68,21 @@ const getNextTurn = (game) => {
 
     if(!currentTurn || !currentTurn.playerId) {
         // for the first turn pick a team randomly
-        const teamsWithPlayers = game.participants.teams.filter(t => )
+        const teamsWithPlayers = game.participants.teams.filter(t => t.players.some(p => p.questionsRemaining>0));
+
+        if(teamsWithPlayers.length===0){
+            //that means he is a solo player
+            return participants[0];
+        }
+
+        //random selection of the first team
+        const firstTeamIndex = Math.floor(Math.random() * teamsWithPlayers.length);
+        const firstTeam = teamsWithPlayers[firstTeamIndex];
+
+        //agr do player hai toh ya toh number 1 choose hoga ya 0 randomnness se
+
+        //now  let's find the player with turn 1 in the selected team
+        const firstPlayer = firstTeam.players.find(p=> p.turnNumber === 1 && p.questionsRemaining>0);
+        
     }
 }

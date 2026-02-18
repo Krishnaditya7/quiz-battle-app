@@ -26,14 +26,19 @@ const userSchema=new mongoose.Schema({
         required: true,
         enum : ['6', '7', '8', '9', '10', '11', '12', 'College', 'Other'], 
     },
+    dob: {
+        type: Date,
+        required: true
+    },
     topics: [{
         type:String,
         required:true
     }],                           //so that ai can find the best teams to join for the player
-   rating: {
-    type:Number,
-    default:0
-   },
+    //removed rating
+   xp:{
+     type : Number,
+     default:0
+   },                         
    stats: {
     gamesPlayed:{type: Number, default:0},
     wins:{type: Number, default:0},
@@ -50,21 +55,29 @@ const userSchema=new mongoose.Schema({
     ref:'Team',
     default:NULL
    },
+   position: {
+    type: String,
+    ref:'Team',
+    default: 'Member'
+   },
    level: {
   type: Number,
   default: 1,
   min:1
  },
-leader: {
-   isOnline:{
+ friends:[{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: NULL
+ }],
+isOnline:{
     type:Boolean,
     default:false
    },
    lastActive:{
     type:Date,
     default:Date.now
-   }
-   },
+},
    timestamps:true           //it is a part of the object userSchmea
 });
 

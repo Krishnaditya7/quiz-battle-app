@@ -1,22 +1,5 @@
 import mongoose from 'mongoose';
 
-const messageSchema = new mongoose.Schema({
-  sender: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  },
-  message: {
-    type: String,
-    required: true,
-    maxlength: 1000
-  },
-  timestamp: {
-    type: Date,
-    default: Date.now
-  }
-});
-
 const teamSchema = new mongoose.Schema({
   name: {
     type: String,
@@ -31,28 +14,47 @@ const teamSchema = new mongoose.Schema({
 default: 0,
 min:1
   },
-  rating: {
-    type: Number,
-    default: 0
-   },
-  leader: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true
-  },
+  // removed rating
   members: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
-  }],
+  user: { type: Schema.Types.ObjectId, ref: 'User' },
+  role: {
+    type: String,
+    enum: ['leader', 'member'], // or just 'leader' vs 'member'
+    default: 'member'
+  },
+  status: { type: String, enum: ['active', 'muted', 'kicked'], default: 'active' }
+}],
   maxMembers: {
     type: Number,
     default: 4  // For squad mode (max 4 players)
   },
-  isActive: {
-    type: Boolean,
-    default: true
+  topic:{
+    type: String,
+    required: true
   },
-  chat: [messageSchema]
+  // removed active...coz team players that are users should be active not the whole team
+  //removed messageSchema so that people can just not only send text, but pdf,voice,etc etc
+  dp:{
+    type: String,
+    default: "any_url",
+    trim: true
+  },
+  minPlayerLevelRequired:{
+    type: Number,
+    default:0
+  },
+  totalWon:{
+    type: Number,
+    default: 0
+  },
+  totalLoss:{
+    type: Number,
+    default: 0
+  },
+  draws:{
+    type: Number,
+    default:0
+  },
 }, {
   timestamps: true
 });
