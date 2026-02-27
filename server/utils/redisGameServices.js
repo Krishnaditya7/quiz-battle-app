@@ -1,176 +1,168 @@
-//these codes will be used by gameControllers for better performance
-import { useId } from "react";
-import redis from "../config/Redis";
-import K from "../config/redisKeys";
+// ============================================================
+// REDIS GAME SERVICE
+// All Redis read/write operations for live game management.
+// Used by: gameController.js + socket handlers
+// ============================================================
+
+import redis from '../config/redis.js';
+import K from '../config/redisKeys.js';
 import { v4 as uuid } from 'uuid';
 
-//User ki PRESENCE ki baat
-//  ------------------------------------------------------------------------------------
+// ─────────────────────────────────────────────
+// USER PRESENCE
+// ─────────────────────────────────────────────
+
 export const setUserOnline = async (userId, socketId, username, level) => {
-    await redis.hset(K.userOnline(userId), {
-        socketId,
-        username,
-        level,
-        isInGame: 'false',
-    });
-    await redis.expire(K.userOnline(userId), 60*60*2)
-    //aisa hai ki koi cheez setUserOnline ko activate kregi then username,level wagerah bhi aagya even after the fact ki
-    //it is stored in mongo...because player aagya...khelne ki mansha se to cache rakho na uski values taaki woh jaldi 
-    //matchmaking kr paaye
+  await redis.hset(K.userOnline(userId), {
+    socketId,
+    username,
+    level,
+    isInGame: 'false',
+  });
+  await redis.expire(K.userOnline(userId), 60 * 60 * 2); // 2 hours TTL
 };
-export const setUserOffline = async(userId) => {
-    await redis.del(K.userOnline(userId));
+
+export const setUserOffline = async (userId) => {
+  await redis.del(K.userOnline(userId));
 };
 
 export const setUserInGame = async (userId, gameId) => {
-    await redis.hset(K.userOnline(userId), { isInGame: 'true', gameId });
-    await redis.expire(K.userOnline(userId), 60*60*2);
-    /*✅ In Redis → YES
-❌ In your JavaScript model → Not necessarily
-
-Important:
-
-Redis is schema-less.
-
-There is no predefined structure like MongoDB schema.
-
-When you do:
-
-redis.hset(key, { isInGame: 'true' })
-
-
-If isInGame field didn’t exist before →
-Redis simply creates it.
-
-If it already existed →
-Redis updates it.*/
+  await redis.hset(K.userOnline(userId), { isInGame: 'true', gameId });
+  await redis.expire(K.userOnline(userId), 60 * 60 * 2);
 };
 
 export const getUserOnlineData = async (userId) => {
-    return await redis.hgetall(K.userOnline(userId));
-    // Get all the fields and values in a hash
+  return await redis.hgetall(K.userOnline(userId));
 };
 
 export const isUserOnline = async (userId) => {
-    return await redis.exists(K.userOnline(userId));
-    /* The EXISTS command in Redis checks for the existence of one or more specified keys in the database. It returns the total count of keys that exist, with a return value of 
- (or higher) indicating existence, and 
- indicating the key does not exist.*/
+  return await redis.exists(K.userOnline(userId));
 };
-// --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-// MatchMaking Queue banana
-// ------------------------------------------------------------------------------------------------------------------------------------
-export const addToQueue = async (userId,{ username, level, topic, questionCount, opponentType, playerClass, teamId = null}) => {
-    const queueKey = K.matchQueue(topic, questionCount, opponentType, playerClass);
+// ─────────────────────────────────────────────
+// MATCHMAKING QUEUE
+// ─────────────────────────────────────────────
 
-    // entry ke datas jisko fulfill krke joining hogi
-    await redis.hset(K.queueEntry(userId), {
-        userId,
-        username,
-        level,
-        topic,
-        questionCount,
-        opponentType,
-        class: playerClass,
-        teamId: teamId || '',
-        joinedAt: Date.now(),
-    });
-    await redis.expire(K.queueEntry(userId),180);
+export const addToQueue = async (userId, { username, level, topic, questionCount, opponentType, playerClass, teamId = null }) => {
+  const queueKey = K.matchQueue(topic, questionCount, opponentType, playerClass);
 
-    await redis.lpush(queueKey, userId);
-    await redis.expire(queueKey, 180);
-    //not being too harsh with levels and making inter-competition, challenge icon sending req with time topic team
- return queueKey;
+  // Store full entry data
+  await redis.hset(K.queueEntry(userId), {
+    userId,
+    username,
+    level,
+    topic,
+    questionCount,
+    opponentType,
+    class: playerClass,
+    teamId: teamId || '',
+    joinedAt: Date.now(),
+  });
+  await redis.expire(K.queueEntry(userId), 180); // 3 min queue timeout
+
+  // Push userId into the right queue
+  await redis.lpush(queueKey, userId);
+  await redis.expire(queueKey, 180);
+
+  return queueKey;
 };
- export const removeFromQueue = async (userId, topic, questionCount, opponentType, playerClass) => {
-    const queueKey = K.matchQueue(topic, questionCount, opponentType, playerClass);
-    await redis.lrem(queueKey, 0, userId);
-    await redis.del(K.queueEntry)
- };
 
- export const getQueueLength = async (userId, topic, questionCount, opponentType, playerClass) => {
-    return await redis.llen(K.matchQueue(topic, questionCount, opponentType, playerClass));
- };
- export const getQueueEntries = async (topic, questionCount, opponentType, playerClass) => {
-       const queueKey = K.matchQueue(topic, questionCount, opponentType, playerClass);
-       const userIds = await redis.lrange(queueKey, 0, -1);
-       if(!userIds.length) return [];
+export const removeFromQueue = async (userId, topic, questionCount, opponentType, playerClass) => {
+  const queueKey = K.matchQueue(topic, questionCount, opponentType, playerClass);
+  await redis.lrem(queueKey, 0, userId);
+  await redis.del(K.queueEntry(userId));
+};
 
-       const entries = await Promise.all(
-        userIds.map(id => redis.hgetall(K.queueEntry(id)))
-       );
-       return entries.filter(Boolean);
- };
- /*We need removeFromQueue because:
+export const getQueueLength = async (topic, questionCount, opponentType, playerClass) => {
+  return await redis.llen(K.matchQueue(topic, questionCount, opponentType, playerClass));
+};
 
-✔ Users can cancel
-✔ Users can disconnect
-✔ Users can get matched
-✔ TTL is only backup cleanup
-✔ Prevents ghost players
-✔ Prevents duplicate matches
+export const getQueueEntries = async (topic, questionCount, opponentType, playerClass) => {
+  const queueKey = K.matchQueue(topic, questionCount, opponentType, playerClass);
+  const userIds = await redis.lrange(queueKey, 0, -1);
+  if (!userIds.length) return [];
 
-Creates a Promise that is resolved with an array of results when all of the provided Promises resolve, or rejected when any Promise is rejected.
-*/
-/*---------------------------
-Ab ek temporary team for Solo but not alone player
----------------------------------------------------------------------*/
+  const entries = await Promise.all(
+    userIds.map(id => redis.hgetall(K.queueEntry(id)))
+  );
+  return entries.filter(Boolean);
+};
+
+// Get a single user's queue entry (to check if they're queued)
+export const getUserQueueEntry = async (userId) => {
+  const data = await redis.hgetall(K.queueEntry(userId));
+  return data && data.userId ? data : null;
+};
+
+// ─────────────────────────────────────────────
+// TEMPORARY TEAM (solo players grouped for duo/trio/squad)
+// ─────────────────────────────────────────────
+
 export const createTempTeam = async (members, topic, questionCount) => {
-    const teamId = uuid();
-    await redis.hset(K.tempTeam(tempTeamId),{
-        tempTeamId,
-        members: JSON.stringify(members), //array of { userId, username, level }
-        topic,
-        questionCount,
-        createdAt : Date.now(),
-    });
-    await redis.expire(K.tempTeam(tempTeamId), 600); 
-    return tempTeamId;
+  const tempTeamId = uuid();
+  await redis.hset(K.tempTeam(tempTeamId), {
+    tempTeamId,
+    members: JSON.stringify(members), // array of { userId, username, level }
+    topic,
+    questionCount,
+    createdAt: Date.now(),
+  });
+  await redis.expire(K.tempTeam(tempTeamId), 600); // 10 min TTL
+  return tempTeamId;
 };
 
 export const getTempTeam = async (tempTeamId) => {
-    const data = await redis.hgetall(K.tempTeam(tempTeamId));
-    if(!data || !data.members) return null;
-
-    data.members= JSON.parse(data.members);
-    return data;
+  const data = await redis.hgetall(K.tempTeam(tempTeamId));
+  if (!data || !data.members) return null;
+  data.members = JSON.parse(data.members);
+  return data;
 };
 
-export const deleteTempTeam = async (teamTeamId) => {
-    await redis.del(K.tempTeam(tempTeamId));
+export const deleteTempTeam = async (tempTeamId) => {
+  await redis.del(K.tempTeam(tempTeamId));
 };
-/*----------------------------------
-Game session 
--------------------------------------*/
+
+// ─────────────────────────────────────────────
+// GAME SESSION
+// ─────────────────────────────────────────────
+
 export const createGameSession = async ({
-    gameId, topic, totalQuestions, mode,
-    teamAId, teamBId,
-    teamAMembers, teamBMembers, // array of userId strings
+  gameId, topic, totalQuestions, mode,
+  gameMode,
+  teamAId, teamBId,
+  teamAMembers, teamBMembers, // arrays of userId strings
+  teamAStance, teamBStance,
 }) => {
-    await redis.hset(K.gameSession(gameId), {
-        gameId,
-        topic,
-        totalQuestions,
-        questionsAsked: 0,
-        status: 'greet',
-        mode,
-        teamAId,
-        teamBId,
-        currentTeam: 'teamA',    //that means team A goes first after random pick
-        currentTurnIndex: 0,
-        teamAscore: 0,
-        teamBScore: 0,
-        startedAt: Date.now(),
-    });
-    await redis.expire(K.gameSession(gameId), 60*60*2);
+  await redis.hset(K.gameSession(gameId), {
+    gameId,
+    topic,
+    totalQuestions,
+    questionsAsked: 0,
+    status: 'greet',       // greet → active → done
+    mode,
+    gameMode: gameMode || 'quiz',
+    teamAId,
+    teamBId,
+    teamAMembers: teamAMembers.join(','),  // ← FIXED: store as comma-separated
+    teamBMembers: teamBMembers.join(','),  // ← FIXED
+    teamAStance: teamAStance || '',
+    teamBStance: teamBStance || '',
+    currentTeam: 'teamA',  // teamA goes first (set after random pick)
+    currentTurnIndex: 0,
+    teamAScore: 0,
+    teamBScore: 0,
+    startedAt: Date.now(),
+  });
+  await redis.expire(K.gameSession(gameId), 60 * 60 * 2); // 2 hour max
 
-    const allPlayers = [...teamAMembers, ...teamBMembers];
-    if(allPlayers.length){
-        await redis.sadd(K.activePlayers(gameId), ...allPlayers);
-        await redis.expire(K.activePlayers(gameId), 60*60*2);
-}
+  // Store all active players
+  const allPlayers = [...teamAMembers, ...teamBMembers];
+  if (allPlayers.length) {
+    await redis.sadd(K.activePlayers(gameId), ...allPlayers);
+    await redis.expire(K.activePlayers(gameId), 60 * 60 * 2);
+  }
 };
+
 export const getGameSession = async (gameId) => {
   return await redis.hgetall(K.gameSession(gameId));
 };
@@ -209,7 +201,7 @@ export const deleteGameSession = async (gameId) => {
   );
 };
 
-// ────────────────────
+// ─────────────────────────────────────────────
 // TURN ORDER
 // ─────────────────────────────────────────────
 
@@ -457,4 +449,87 @@ export const updateChallengeStatus = async (challengeId, status) => {
 
 export const deleteChallengeRequest = async (challengeId) => {
   await redis.del(K.challengeRequest(challengeId));
+};
+
+// ─────────────────────────────────────────────
+// DEBATE POINTS
+// ─────────────────────────────────────────────
+
+export const addDebatePoint = async (gameId, userId, team, point, turnNumber) => {
+  const pointData = JSON.stringify({ 
+    userId, 
+    team, 
+    point, 
+    turnNumber,
+    timestamp: Date.now() 
+  });
+  await redis.rpush(K.debatePoints(gameId), pointData);
+  await redis.expire(K.debatePoints(gameId), 60 * 60 * 2);
+};
+
+export const getDebatePoints = async (gameId) => {
+  const points = await redis.lrange(K.debatePoints(gameId), 0, -1);
+  return points.map(p => JSON.parse(p));
+};
+
+export const startDebatePointTimer = (gameId) => startTimer(K.timerDebatePoint(gameId), 300); // 5 min
+
+// ─────────────────────────────────────────────
+// QUIZ QUESTION HISTORY
+// ─────────────────────────────────────────────
+
+export const addQuestionToHistory = async (gameId, questionData) => {
+  // questionData: { askedBy, askedByTeam, question, translatedQuestion, correctAnswer, answeredBy, answeredByTeam, givenAnswer, isCorrect }
+  const data = JSON.stringify({ ...questionData, timestamp: Date.now() });
+  await redis.rpush(K.questionHistory(gameId), data);
+  await redis.expire(K.questionHistory(gameId), 60 * 60 * 2);
+};
+
+export const getQuestionHistory = async (gameId) => {
+  const questions = await redis.lrange(K.questionHistory(gameId), 0, -1);
+  return questions.map(q => JSON.parse(q));
+};
+
+// ─────────────────────────────────────────────
+// DISCUSSION MODE - AI QUESTIONS & LEADER READY
+// ─────────────────────────────────────────────
+
+export const setDiscussionQuestion = async (gameId, questionNumber, question) => {
+  await redis.hset(`game:${gameId}:discussionQuestion`, {
+    questionNumber,
+    question,
+    timestamp: Date.now(),
+  });
+  await redis.expire(`game:${gameId}:discussionQuestion`, 60 * 60 * 2);
+};
+
+export const getDiscussionQuestion = async (gameId) => {
+  return await redis.hgetall(`game:${gameId}:discussionQuestion`);
+};
+
+export const isDiscussionLeader = async (gameId, userId) => {
+  const leaders = await redis.smembers(`game:${gameId}:leaders`);
+  return leaders.includes(userId);
+};
+
+export const setDiscussionLeaders = async (gameId, leaderIds) => {
+  if (leaderIds.length > 0) {
+    await redis.sadd(`game:${gameId}:leaders`, ...leaderIds);
+    await redis.expire(`game:${gameId}:leaders`, 60 * 60 * 2);
+  }
+};
+
+export const markLeaderReadyForNext = async (gameId, userId) => {
+  await redis.sadd(`game:${gameId}:leadersReady`, userId);
+  await redis.expire(`game:${gameId}:leadersReady`, 60);
+};
+
+export const areBothLeadersReady = async (gameId) => {
+  const readyCount = await redis.scard(`game:${gameId}:leadersReady`);
+  const totalLeaders = await redis.scard(`game:${gameId}:leaders`);
+  return readyCount === totalLeaders && totalLeaders > 0;
+};
+
+export const clearLeaderReadyStates = async (gameId) => {
+  await redis.del(`game:${gameId}:leadersReady`);
 };

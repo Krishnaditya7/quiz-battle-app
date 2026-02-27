@@ -1,40 +1,41 @@
-import express from 'express';
+// ============================================================
+// TEAM ROUTES
+// Base: /api/team
+// ============================================================
 
-import{
-    createTeam,
-    getAvailableTeams,
-    joinTeam,
-    setCurrentTeam,
-    getMyTeam,
-    leaveTeam,
-    unsetCurrentTeam,
-    transferLeadership,
-    sendTeamMessage,
-    getTeamChat
+import express from 'express';
+import protect from '../middleware/authMiddleware.js';
+import {
+  createTeam,
+  getTeam,
+  browseTeams,
+  requestJoinTeam,
+  approveJoinRequest,
+  leaveTeam,
+  kickMember,
+  inviteToTeam,
+  updateTeam,
+  getMyTeams,
+  setCurrentTeam,
+  playSolo,
 } from '../controllers/teamController.js';
-import { protect } from '..middleware/auth.js';
 
 const router = express.Router();
 
-//middleware se authent9ication ke baad hi access kr paoge (jwt tokens se)
-router.post('/create',protect,createTeam);
-router.get('/available',protect,getAvailableTeams);
-router.post('/join/:teamId',protect,joinTeam);
-router.post('/currentTeam/:teamId',protect,setCurrentTeam);
-router.get('/my-team',protect,getMyTeam);
-router.post('/leave',protect,leaveTeam);
-router.post('/unset',protect,unsetCurrentTeam);
-router.post('/transfer/:teamId',protect,transferLeadership);
-router.post('/chat/send',protect,sendTeamMessage);
-router.get('/chat',protect,getTeamChat);
+// All team routes are protected
+router.use(protect);
 
+router.post('/create', createTeam);
+router.get('/browse', browseTeams);
+router.get('/my-teams', getMyTeams);
+router.get('/:teamId', getTeam);
+router.post('/:teamId/join-request', requestJoinTeam);
+router.post('/:teamId/approve-join', approveJoinRequest);
+router.post('/:teamId/leave', leaveTeam);
+router.post('/:teamId/kick', kickMember);
+router.post('/:teamId/invite', inviteToTeam);
+router.patch('/:teamId/update', updateTeam);
+router.post('/:teamId/set-current', setCurrentTeam);
+router.post('/play-solo', playSolo);
 
-// A user can be in many teams
-
-// A user has ONE currentTeam
-
-// Many actions should rely on req.user.currentTeam
-
-// :teamId is needed only when the user is choosing a team
-
-// :teamId is NOT needed when the action is about current context
+export default router;

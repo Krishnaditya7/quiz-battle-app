@@ -1,408 +1,623 @@
-import Team from "../models/Team";
-import User from "../models/Users";
+// ============================================================
+// TEAM CONTROLLER
+// Handles: create team, join team, leave team, kick member,
+//          update team (DP/topic/minLevel), get team details,
+//          get team list (for browsing), delete team
+// ============================================================
 
-// @desc Creating a new team
-// @route POST/api/teams/create
-// @access Private
+import Team from '../models/Team.js';
+import User from '../models/Users.js';
+import Notification from '../models/Notification.js';
 
-export const createTeam = async (req,res) => {
-    try{
-        const { name, type, maxMembers } = req.body;
-
-        // validation
-        if(!name){
-            return res.status(400).json({
-                success: false,
-                message: 'team name is required'
-            });
-        }
-        const existingTeam = await Team.findOne({ name });
-        if(existingTeam){
-            return res.status(400).json({
-                success: false,
-                message: 'Team name already taken'
-            });
-        }
-        // not considering logic of claude: if user already in the team then he can't create a new team
-        //let's create the team
-
-        const team = await Team.create({
-            name,
-            level: level || 1,  //type changed to level
-            leader: req.user._id,
-            members:[req.users._id],
-            maxMembers: maxMembers || 4
-        });
-//i loved this current team concept it will make my logic easy : if (user in currentTeam) then he will play for that team only else if he want to
-//  play being with another team he should change his current team with the team he wants to play
-        await User.findByIdAndUpdate(req.user._id, { 
-            currentTeam: team._id,
-            $addToSet: { teams: team._id }   //push alllows duplicate but  add to set ensures uniqueness
-        });
-        const populatedTeam = await Team.findById(team._id).populate('leader members','username rating');
-
-        res.status(201).json({
-            success: true,
-            message: 'Team created successfully',
-            data: { team: populatedTeam }
-        });
-    }     catch (error) {
-          console.error('Create team error:',error);
-          res.status(500).json({
-            success: false,
-            message: 'Server error',
-            error: error.message
-          });
-        }
-    };
-// @desc Get available team to join
-// @route Get/api/teams/available
-// @access Private
-export const getAvailableTeams = async (req,res) => {
-    try{
-        const { level } = req.query;
-
-        const query = {
-            isActive: true,
-            $expr: { $lt: [{$size: "$members"}, "$maxMembers"] }   //Not Null
-        };
-        if(level){
-           query.level = level;
-        }
-        const teams = await Team.find(query)
-        .populate('leader members', 'username rating')
-        .sort({ createdAt: -1 })
-        .limit(20);
-
-        res.status(200).json({
-            success: true,
-            data: { teams }
-        });
-    } catch(error){
-       console.error('Get available teams error:',error);
-       res.status(500).json({
-        success: false,
-        message: 'server error',
-        error: error.message
-       });
-    }
+// ─────────────────────────────────────────────
+// HELPER: Calculate team level (avg of members)
+// ─────────────────────────────────────────────
+const calculateTeamLevel = async (team) => {
+  const memberIds = team.members.map(m => m.user);
+  const users = await User.find({ _id: { $in: memberIds } }).select('level');
+  const avgLevel = users.reduce((sum, u) => sum + u.level, 0) / users.length;
+  return Math.round(avgLevel);
 };
-// @desc Join a team
-// @route Post/api/team/join/:teamId
-// @access Private
 
-export const joinTeam = async (req,res) => {
-    try{
-        const { teamId } = req.params;
-        if(team.members.length >= team.maxMembers){
-    return res.status(400).json({
-        success: false,
-        message: 'team is full'
-    });
-   }
-        // our current team can be same as what and when we want to play we will choose from 
-        // which team should we play and THAT will become the current team
-        await Team.findByIdAndUpdate(teamId, {
-            $addToSet: { members:req.user._id }
-        });
-        await User.findByIdAndUpdate(req.user._id, {
-            $addToSet: { teams: teamId }
-        });
-        const team = await Team.findById(teamId);
-        if(!team){
-        return res.status(404).json({
-             success: false,
-             message: 'team not found'
-        });
-      }
-    const populatedTeam = await Team.findById(team._id).populate('leader members', 'username rating');
+// ─────────────────────────────────────────────
+// POST /api/team/create
+// Body: { name, maxMembers, topics: [topic1, topic2, ...] }
+// minPlayerLevelRequired is auto-calculated
+// ─────────────────────────────────────────────
+export const createTeam = async (req, res) => {
+  try {
+    const { name, maxMembers, topics } = req.body;
+    const userId = req.userId;
 
-    res.status(200).json({
-        success: true,
-        message: 'Joined team successfully',
-        data: { team: populatedTeam }
-    });
-  } catch(error){
-    console.error('Join team error:',error);
-    res.status(500).json({
-        success:false,
-        message:'server error',
-        error: error.message
-    })
-  }
-};
-export const setCurrentTeam = async (req,res) => {
-    const { teamId }= req.params;
-     
-    const team = await Team.findById(teamId);
-    if (!team) {
-      return res.status(404).json({
-        success: false,
-        message: 'Team not found'
+    // ── Validate ──
+    if (!name || !topics || !Array.isArray(topics) || topics.length === 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Team name and at least one topic are required' 
       });
     }
-    const user = await User.findById(req.user._id);
 
-    if(!user.teams.some(t => t.equals(teamId))) {
-        return res.status(403).json({
-            success: false,
-            message: 'You are not a member of this team'
-        });
+    // ── Check if team name already exists ──
+    const existingTeam = await Team.findOne({ name });
+    if (existingTeam) {
+      return res.status(409).json({ success: false, message: 'Team name already taken' });
     }
+
+    // ── Create team ──
+    const team = await Team.create({
+      name,
+      maxMembers: maxMembers || 4,
+      topics: topics,
+      members: [{
+        user: userId,
+        role: 'leader',
+        status: 'active',
+      }],
+    });
+
+    // ── Calculate team level (just creator for now) ──
+    team.level = user.level;
+    
+    // ── Auto-calculate minPlayerLevelRequired = max(1, teamLevel - 5) ──
+    team.minPlayerLevelRequired = Math.max(1, team.level - 5);
+    
+    await team.save();
+
+    // ── Add team to user's teams array ──
+    await User.findByIdAndUpdate(userId, {
+      $push: { teams: team._id },
+      currentTeam: team._id,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Team created successfully!',
+      team,
+    });
+
+  } catch (err) {
+    console.error('Create team error:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// ─────────────────────────────────────────────
+// GET /api/team/:teamId
+// Get single team details with populated members
+// ─────────────────────────────────────────────
+export const getTeam = async (req, res) => {
+  try {
+    const { teamId } = req.params;
+
+    const team = await Team.findById(teamId)
+      .populate('members.user', 'username level xp stats');
+
+    if (!team) {
+      return res.status(404).json({ success: false, message: 'Team not found' });
+    }
+
+    // Recalculate team level dynamically
+    team.level = await calculateTeamLevel(team);
+
+    return res.status(200).json({ success: true, team });
+
+  } catch (err) {
+    console.error('Get team error:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// ─────────────────────────────────────────────
+// GET /api/team/browse
+// Query params: ?topic=math (optional - filters by specific topic)
+// Returns teams where topics array includes queried topic, teamLevel ≤ userLevel + 5
+// ─────────────────────────────────────────────
+export const browseTeams = async (req, res) => {
+  try {
+    const { topic } = req.query;
+    const userId = req.userId;
+
+    const user = await User.findById(userId);
+
+    // ── Build filter ──
+    const filter = {};
+    
+    // If topic specified, show teams that have this topic in their topics array
+    if (topic) {
+      filter.topics = topic;  // MongoDB automatically checks if array contains value
+    }
+
+    // User is not already in the team
+    filter['members.user'] = { $ne: userId };
+
+    let teams = await Team.find(filter)
+      .populate('members.user', 'username level class');
+
+    // Filter teams based on rules
+    teams = teams.filter(team => {
+      // 1. Team must not be full
+      if (team.members.length >= team.maxMembers) return false;
+
+      // 2. Calculate team avg level
+      const avgLevel = team.members.reduce((sum, m) => sum + m.user.level, 0) / team.members.length;
+      const teamLevel = Math.round(avgLevel);
+
+      // 3. User can join teams where: teamLevel ≤ (userLevel + 5)
+      if (teamLevel > user.level + 5) return false;
+
+      // 4. User must meet team's minPlayerLevelRequired
+      if (user.level < team.minPlayerLevelRequired) return false;
+
+      return true;
+    });
+
+    return res.status(200).json({ success: true, teams });
+
+  } catch (err) {
+    console.error('Browse teams error:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// ─────────────────────────────────────────────
+// POST /api/team/:teamId/join-request
+// User sends join request to team (requires leader approval)
+// Creates a notification for the team leader
+// ─────────────────────────────────────────────
+export const requestJoinTeam = async (req, res) => {
+  try {
+    const { teamId } = req.params;
+    const userId = req.userId;
+
+    const team = await Team.findById(teamId).populate('members.user', 'level');
+    if (!team) {
+      return res.status(404).json({ success: false, message: 'Team not found' });
+    }
+
+    // ── Check if team is full ──
+    if (team.members.length >= team.maxMembers) {
+      return res.status(400).json({ success: false, message: 'Team is full' });
+    }
+
+    // ── Check if user is already in team ──
+    const alreadyMember = team.members.some(m => m.user._id.toString() === userId);
+    if (alreadyMember) {
+      return res.status(400).json({ success: false, message: 'You are already in this team' });
+    }
+
+    // ── Get user ──
+    const user = await User.findById(userId);
+
+    // ── Calculate current team level ──
+    const avgLevel = team.members.reduce((sum, m) => sum + m.user.level, 0) / team.members.length;
+    const teamLevel = Math.round(avgLevel);
+
+    // ── Check eligibility: teamLevel ≤ userLevel + 5 ──
+    if (teamLevel > user.level + 5) {
+      return res.status(403).json({ 
+        success: false, 
+        message: `Team level (${teamLevel}) is too high. Max allowed: ${user.level + 5}` 
+      });
+    }
+
+    // ── Check if user meets minPlayerLevelRequired ──
+    if (user.level < team.minPlayerLevelRequired) {
+      return res.status(403).json({
+        success: false,
+        message: `Minimum level ${team.minPlayerLevelRequired} required`,
+      });
+    }
+
+    // ── Create notification for team leader ──
+    const leader = team.members.find(m => m.role === 'leader');
+    
+    await Notification.create({
+      recipient: leader.user,
+      sender: userId,
+      type: 'team_join_request',
+      team: teamId,
+      message: `${user.username} wants to join ${team.name}`,
+      status: 'pending',
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Join request sent to team leader',
+      teamId,
+    });
+
+  } catch (err) {
+    console.error('Request join team error:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// ─────────────────────────────────────────────
+// POST /api/team/:teamId/approve-join
+// Body: { userIdToApprove }
+// Team leader approves a join request
+// ─────────────────────────────────────────────
+export const approveJoinRequest = async (req, res) => {
+  try {
+    const { teamId } = req.params;
+    const { userIdToApprove } = req.body;
+    const leaderId = req.userId;
+
+    const team = await Team.findById(teamId);
+    if (!team) {
+      return res.status(404).json({ success: false, message: 'Team not found' });
+    }
+
+    // ── Check if requester is leader ──
+    const leader = team.members.find(m => m.user.toString() === leaderId);
+    if (!leader || leader.role !== 'leader') {
+      return res.status(403).json({ success: false, message: 'Only leader can approve join requests' });
+    }
+
+    // ── Check if team is full ──
+    if (team.members.length >= team.maxMembers) {
+      return res.status(400).json({ success: false, message: 'Team is full' });
+    }
+
+    // ── Check if user already in team ──
+    const alreadyMember = team.members.some(m => m.user.toString() === userIdToApprove);
+    if (alreadyMember) {
+      return res.status(400).json({ success: false, message: 'User is already in this team' });
+    }
+
+    // ── Add user to team ──
+    team.members.push({
+      user: userIdToApprove,
+      role: 'member',
+      status: 'active',
+    });
+
+    // Recalculate team level and minPlayerLevelRequired
+    team.level = await calculateTeamLevel(team);
+    team.minPlayerLevelRequired = Math.max(1, team.level - 5);
+    await team.save();
+
+    // ── Add team to user ──
+    await User.findByIdAndUpdate(userIdToApprove, {
+      $push: { teams: team._id },
+    });
+
+    // Update notification status to 'accepted'
+    await Notification.updateOne(
+      { 
+        recipient: leaderId, 
+        sender: userIdToApprove, 
+        team: teamId, 
+        type: 'team_join_request',
+        status: 'pending'
+      },
+      { status: 'accepted' }
+    );
+
+    // Create notification for the user who got approved
+    const user = await User.findById(userIdToApprove);
+    await Notification.create({
+      recipient: userIdToApprove,
+      sender: leaderId,
+      type: 'team_invite_accepted',
+      team: teamId,
+      message: `Your request to join ${team.name} has been approved!`,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Join request approved',
+      team,
+    });
+
+  } catch (err) {
+    console.error('Approve join request error:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// ─────────────────────────────────────────────
+// POST /api/team/:teamId/leave
+// User leaves a team
+// ─────────────────────────────────────────────
+export const leaveTeam = async (req, res) => {
+  try {
+    const { teamId } = req.params;
+    const userId = req.userId;
+
+    const team = await Team.findById(teamId);
+    if (!team) {
+      return res.status(404).json({ success: false, message: 'Team not found' });
+    }
+
+    const member = team.members.find(m => m.user.toString() === userId);
+    if (!member) {
+      return res.status(400).json({ success: false, message: 'You are not in this team' });
+    }
+
+    // ── If leader leaves, transfer leadership or delete team ──
+    if (member.role === 'leader') {
+      if (team.members.length === 1) {
+        // Last member → delete team
+        await Team.findByIdAndDelete(teamId);
+        await User.findByIdAndUpdate(userId, {
+          $pull: { teams: teamId },
+          $unset: { currentTeam: 1 },
+        });
+        return res.status(200).json({ success: true, message: 'Team disbanded' });
+      } else {
+        // Transfer leadership to next member
+        const nextLeader = team.members.find(m => m.user.toString() !== userId);
+        nextLeader.role = 'leader';
+      }
+    }
+
+    // ── Remove user from team ──
+    team.members = team.members.filter(m => m.user.toString() !== userId);
+    team.level = await calculateTeamLevel(team);
+    team.minPlayerLevelRequired = Math.max(1, team.level - 5);
+    await team.save();
+
+    // ── Remove team from user ──
+    const user = await User.findByIdAndUpdate(userId, {
+      $pull: { teams: teamId },
+    }, { new: true });
+
+    // If this was currentTeam, unset it
+    if (user.currentTeam?.toString() === teamId) {
+      user.currentTeam = null;
+      await user.save();
+    }
+
+    return res.status(200).json({ success: true, message: 'Left team successfully' });
+
+  } catch (err) {
+    console.error('Leave team error:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// ─────────────────────────────────────────────
+// POST /api/team/:teamId/kick
+// Body: { userIdToKick }
+// Leader kicks a member
+// ─────────────────────────────────────────────
+export const kickMember = async (req, res) => {
+  try {
+    const { teamId } = req.params;
+    const { userIdToKick } = req.body;
+    const leaderId = req.userId;
+
+    const team = await Team.findById(teamId);
+    if (!team) {
+      return res.status(404).json({ success: false, message: 'Team not found' });
+    }
+
+    // ── Check if requester is leader ──
+    const leader = team.members.find(m => m.user.toString() === leaderId);
+    if (!leader || leader.role !== 'leader') {
+      return res.status(403).json({ success: false, message: 'Only leader can kick members' });
+    }
+
+    // ── Check if target is in team ──
+    const targetMember = team.members.find(m => m.user.toString() === userIdToKick);
+    if (!targetMember) {
+      return res.status(404).json({ success: false, message: 'User not found in team' });
+    }
+
+    // ── Can't kick yourself ──
+    if (userIdToKick === leaderId) {
+      return res.status(400).json({ success: false, message: 'Use leave endpoint instead' });
+    }
+
+    // ── Remove member ──
+    team.members = team.members.filter(m => m.user.toString() !== userIdToKick);
+    team.level = await calculateTeamLevel(team);
+    team.minPlayerLevelRequired = Math.max(1, team.level - 5);
+    await team.save();
+
+    // ── Remove team from kicked user ──
+    const kickedUser = await User.findByIdAndUpdate(userIdToKick, {
+      $pull: { teams: teamId },
+    }, { new: true });
+
+    if (kickedUser.currentTeam?.toString() === teamId) {
+      kickedUser.currentTeam = null;
+      await kickedUser.save();
+    }
+
+    return res.status(200).json({ success: true, message: 'Member kicked successfully' });
+
+  } catch (err) {
+    console.error('Kick member error:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// ─────────────────────────────────────────────
+// PATCH /api/team/:teamId/update
+// Body: { dp?, addTopic?, removeTopic? }
+// Leader updates team settings - can add or remove one topic at a time
+// ─────────────────────────────────────────────
+export const updateTeam = async (req, res) => {
+  try {
+    const { teamId } = req.params;
+    const { dp, addTopic, removeTopic } = req.body;
+    const userId = req.userId;
+
+    const team = await Team.findById(teamId);
+    if (!team) {
+      return res.status(404).json({ success: false, message: 'Team not found' });
+    }
+
+    // ── Check if requester is leader ──
+    const leader = team.members.find(m => m.user.toString() === userId);
+    if (!leader || leader.role !== 'leader') {
+      return res.status(403).json({ success: false, message: 'Only leader can update team' });
+    }
+
+    // ── Update fields ──
+    if (dp !== undefined) team.dp = dp;
+    
+    // Add a topic (if not already present)
+    if (addTopic) {
+      if (!team.topics.includes(addTopic)) {
+        team.topics.push(addTopic);
+      }
+    }
+    
+    // Remove a topic (must have at least 1 topic remaining)
+    if (removeTopic) {
+      if (team.topics.length === 1) {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'Team must have at least one topic' 
+        });
+      }
+      team.topics = team.topics.filter(t => t !== removeTopic);
+    }
+
+    await team.save();
+
+    return res.status(200).json({ success: true, message: 'Team updated', team });
+
+  } catch (err) {
+    console.error('Update team error:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// ─────────────────────────────────────────────
+// GET /api/team/my-teams
+// Get all teams the user is part of
+// ─────────────────────────────────────────────
+export const getMyTeams = async (req, res) => {
+  try {
+    const userId = req.userId;
+
+    const user = await User.findById(userId).populate({
+      path: 'teams',
+      populate: { path: 'members.user', select: 'username level' },
+    });
+
+    return res.status(200).json({ success: true, teams: user.teams });
+
+  } catch (err) {
+    console.error('Get my teams error:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// ─────────────────────────────────────────────
+// POST /api/team/:teamId/invite
+// Body: { userIdToInvite }
+// Leader sends invite - this bypasses ALL level restrictions
+// ─────────────────────────────────────────────
+export const inviteToTeam = async (req, res) => {
+  try {
+    const { teamId } = req.params;
+    const { userIdToInvite } = req.body;
+    const leaderId = req.userId;
+
+    const team = await Team.findById(teamId);
+    if (!team) {
+      return res.status(404).json({ success: false, message: 'Team not found' });
+    }
+
+    // ── Check if requester is leader ──
+    const leader = team.members.find(m => m.user.toString() === leaderId);
+    if (!leader || leader.role !== 'leader') {
+      return res.status(403).json({ success: false, message: 'Only leader can invite members' });
+    }
+
+    // ── Check if team is full ──
+    if (team.members.length >= team.maxMembers) {
+      return res.status(400).json({ success: false, message: 'Team is full' });
+    }
+
+    // ── Check if user already in team ──
+    const alreadyMember = team.members.some(m => m.user.toString() === userIdToInvite);
+    if (alreadyMember) {
+      return res.status(400).json({ success: false, message: 'User is already in this team' });
+    }
+
+    // ── Check if target user exists ──
+    const targetUser = await User.findById(userIdToInvite);
+    if (!targetUser) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    // ── Create notification for invite ──
+    // (We'll build this in Phase 5, but structure it now)
+    // For now, just add them directly since you said "they would get join automatically"
+    
+    team.members.push({
+      user: userIdToInvite,
+      role: 'member',
+      status: 'active',
+    });
+
+    // Recalculate team level and minPlayerLevelRequired
+    team.level = await calculateTeamLevel(team);
+    team.minPlayerLevelRequired = Math.max(1, team.level - 5);
+    await team.save();
+
+    // Add team to user
+    await User.findByIdAndUpdate(userIdToInvite, {
+      $push: { teams: team._id },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'User added to team via invite',
+      team,
+    });
+
+  } catch (err) {
+    console.error('Invite to team error:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// ─────────────────────────────────────────────
+// POST /api/team/:teamId/set-current
+// Set a team as user's current active team
+// ─────────────────────────────────────────────
+export const setCurrentTeam = async (req, res) => {
+  try {
+    const { teamId } = req.params;
+    const userId = req.userId;
+
+    const user = await User.findById(userId);
+    if (!user.teams.includes(teamId)) {
+      return res.status(403).json({ success: false, message: 'You are not in this team' });
+    }
+
     user.currentTeam = teamId;
     await user.save();
 
-    res.json({
-        success: true,
-        message: 'current team set successfully',
-        data: {
-            currentTeam: teamId
-        }
-    });
-};
-// @desc Get my current team
-// @route GET/api/teams/my-team
-// @access Private
-export const getMyTeam = async (req,res) => {
-    try{
-        if(!req.user.currentTeam){
-            return res.status(404).json({
-                success: false,
-                message: 'You are not in team'
-            });
-        }
-        const team = await Team.findById(req.user.currentTeam).populate('leader members','username rating isOnline lastActive');
+    return res.status(200).json({ success: true, message: 'Current team set', currentTeam: teamId });
 
-        if(!team){
-            return res.status(404).json({
-                success: false,
-                message: 'team not found'
-            });
-        }
-        res.status(200).json({
-            success: true,
-            data: { team }
-        });
-    } catch(error){
-        console.error('get my team error:',error);
-        res.status(500).json({
-            success: false,
-            message: 'server error',
-            error: error.message
-        });
-    }
-};
-// @desc Leave team bro (permanently)
-// @route Post/api/teams/leave
-// @access Private
-export const leaveTeam = async (req,res) => {
-    try{
-        const { teamId }= req.user.currentTeam;
-
-        const team = await Team.findById(teamId);
-        if(!team){
-            return res.status(404).json({
-                succes:false,
-                message: 'Team not found'
-            });
-        }
-        if(!team.members.some(m=>m.equals(req.user._id))) {
-            return res.status(400).json({
-                success: false,
-                message: 'You are not a member of this team'
-            });
-        }
-        if(team.leader.equals(req.user._id)){
-            if(team.members.length > 1){
-                team.members = team.members.filter(m=> !m.equals(req.user._id));
-                team.leader = team.members[0];
-                await team.save();
-            } else{
-                await team.findByIdAndDelete(team._id);
-            }
-        } else{
-            team.members = team.members.filter(m=> !m.equals(req.user._id));
-            await team.save();
-        }
-        // updating the user
-        const user = await user.findById(req.user._id);
-        user.teams = user.teams.filter(t=>!t.equals(team._id));
-
-        if(user.currentTeam && user.currentTeam.equals(team._id)){
-            user.currentTeam=null;
-        }
-        await user.save();
-
-        res.json({
-            succes: true,
-            message: 'Left team successfully'
-        });
-    } catch (error){
-        console.error('error ocuured while leavind team :',error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error'
-        });
-    }
-
+  } catch (err) {
+    console.error('Set current team error:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
 };
 
-// @route Post api/users/unset-current-team
-// @desc changing team in current team to play with other team
-// @access Private
-export const unsetCurrentTeam = async (req,res) => {
-    try{
-        req.user.currentTeam = null;
-        await req.user.save();
+// ─────────────────────────────────────────────
+// POST /api/team/play-solo
+// User switches to solo mode (clears currentTeam)
+// ─────────────────────────────────────────────
+export const playSolo = async (req, res) => {
+  try {
+    const userId = req.userId;
 
-        res.json({
-            success: true,
-            message: 'Current team unset'
-        })
-    } catch(error){
-        console.error('Error occured while changing the current team :',error);
-        res.status(500).json({
-            success: false,
-            message: 'server error'
-        });
-    }
-};
-// @desc team leadership transfer krna
-// @route Post/api/user/transferLeadership
-// @access Private
+    await User.findByIdAndUpdate(userId, { currentTeam: null });
 
-export const transferLeadership = async (req,res) => {   //yeh ek request ho toh hai
-    try{
-    //  us member ka id lena bhi zaruri hai jisko banana hai team leader 
-        const { teamId } = req.params;
-        const { newLeaderId } = req.body;
+    return res.status(200).json({ success: true, message: 'Switched to solo mode' });
 
-        if(!newLeaderId){
-            return res.status(400).json({
-                success: false,
-                message: 'Leader id is reuired'
-            });
-        }
-        const team = await Team.findById(teamId);
-        if(!team){
-            return res.status(404).json({
-               success: false,
-               message: 'Team not found' 
-        });
-    }
-    if(!team.leader.equals(req.user._id)){
-        return res.status(403).json({
-            success: false,
-            message: 'Only team leader can transfer the leadership'
-        });
-    }
-    if(!team.members.some(m=> m.equals(newLeaderId))){
-        return res.status(400).json({
-            success: false,
-            message: 'new team leader should first be in the the team'
-        });
-    }
-    if(team.leader.equals(newLeaderId)){
-        return res.status(400).json({
-            success: false,
-            message: 'user is already the leader'
-        });
-    }
-    team.leader = newLeaderId;
-    await team.save();
-
-    res.json({
-        success: true,
-        message: 'team leadership transferred successfully'
-    });
-} catch(error){
-    console.error('Transfer leadership error:', error);
-    res.status(500).json({
-    success: false,
-    message: 'Server error'
-});
-}
-};
-// @desc send message in the chat
-// @route POST/api/team/chat
-
-export const sendTeamMessage = async (req,res) => {
-    try{
-        const { message } = req.body;
-
-        if(!message || message.trim() === ''){
-            return res.status(400).json({
-                success: false,
-                message: 'message cannot be empty' 
-            });
-        }
-        if(!req.user.currentTeam) {
-            return res.status(400).json({
-                success: false,
-                message: 'User is not in the team'
-            });
-        }
-        const team = await Team.findById(req.user.currentTeam);
-        if(!team){
-            return res.status(404).json({
-                success: true,
-                message: 'Team not found'
-            });
-        }
-        // now let's add message to the chat
-        team.chat.push({
-            sender: req.user._id,
-            message: message.trim()
-        });
-        await team.save();
-
-        const populatedTeam = await Team.findById(team._id).populate('chat.sender','username');
-        res.status(200).json({
-            success: true,
-            data: {
-                message: populatedTeam.chat[populatedTeam.chat.length - 1]
-            }
-        });
-    } catch(error){
-        console.error('Send team message error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error',
-      error: error.message
-    });
-    }
-};
-// @desc get team chat messages
-// @route get/api/teams/chat
-// @access Private
-
-export const getTeamChat = async (req,res) => {
-    try{
-        if(!req.user.currentTeam){
-            return res.status(400).json({
-                success: false,
-                message: 'you are not in any team'
-            });
-        }
-        const team = await Team.findById(req.user.currentTeam).populate('chat.sender','username');
-        if(!team){
-            return res.status(404).json({
-                success: false,
-                message: 'team not found'
-            });
-        }
-        res.status(200).json({
-            success: true,
-            data: {
-                message: team.chat
-            }
-        });
-    } catch(error){
-        console.error('Get team chat error:',error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error',
-            error : error.message
-        });
-    }
+  } catch (err) {
+    console.error('Play solo error:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
 };

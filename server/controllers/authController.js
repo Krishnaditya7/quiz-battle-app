@@ -1,182 +1,176 @@
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import User from '../models/Users';
-import { generateToken } from '../utils/jwt';
 
-// @access -> it will be public
-//@routes -> POST/API/AUTH/SIGNUP
-//@desc we are registering up a new user
-export const signup = async (req,res) => {
-    try{
-        const {username,email,password,class: userClass,topics} = req.body;
-        // req.body sends the data sent by the user
-        //let's validate
-       // success is an API for the frontend UI
-       //validation
-
-       if(!username || !email || !password || !topics || !userClass || topics.lenght===0){
-        return res.status(400).json({
-            success: false,
-            message: 'FILL ALL THE DETAILS'
-        });
-       }
-
-       const existingUsername = await User.findOne({ username });
-       if(existingUsername){
-        return res.status(400).json({
-            success: false,
-            message: 'Username already taken'
-        });
-       }
-
-       const existingEmail = await User.findOne({ email });
-       if(existingEmail){
-        return res.status(400).json({
-            success: false,
-            message: 'Email already taken'
-        });
-       }
-
-       const salt = await bcrypt.genSalt(10);
-       const hashedPassword = await bcrypt.hash(password, salt);
-
-       const user = await User.create({
-         username,
-         email,
-         password: hashedPassword,
-         class: userClass,
-         topics
-       });
+const generateToken = (userId) => {
+    return jwt.sign(
+        { userId },
+        Process.env.JWT_SECRET,
+        { expiresIn : '7d'}
         
-       const token = generateToken(user._id);
+    );
+};
+const sendToken = (res, token) => {
+    res.cookie('token', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge:  7* 24 * 60 * 60 * 1000,
+    });
+};
+//Sign-up
+export const SignUp = async (req,res) => {
+    try{
+        const { username, email, topic, password, className, dob, topics } = req.body;
+        if(!username || !email || !password || !className || !dob || !topics?.length) {
+            return res.status(400).json({
+                success: false,
+                message: 'All fields are required to be filled'
+            }); 
+        }
+        const existingUser = await User.findOne({
+            $or: [{ email: email.toLowerCase() }, { username }]
+        });
+        if(existingUser){
+            const field = existingUser.email === email.toLowerCase() ? 'Email': 'Username';
+            return res.status(409).json({
+                success: false,
+                message: `${field} is already taken`
+            });
+        }
 
-       res.status(201).json({
-        success: true,
-        message: 'User registered successfully',
-        data: {
+        const validClasses = ['6', '7', '8', '9', '10', '11', '12', 'College', 'Other'];
+        if(!validClasses.includes(className)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid class.'
+            });
+        }
+        const parsedDOB = new Date(dob);
+        if(isNaN(parsedDOB.getTime())) {
+            return res.status(400).json({ success: false, message: 'Invalid DOB'});
+        }
+        // level excat match karane ki zarurat nhi aas paas bhi kara sakte ho and consider team level as avg of whole member
+        const user = await User.create({
+            username,
+            email: email.toLowerCase(),
+            password: hashedPassword,
+            class: className,
+            dob: parsedDOB,
+            topics: Array.isArray(topics)? topics : [topics],
+        });
+        const token = generateToken(user._id);
+        sendTokenCookie(res, token);
+
+        return res.status(201).json({
+            success: true,
+            message: 'Account created successfully',
             user: {
-                id: user._id,
+                _id: user._id,
                 username: user.username,
                 email: user.email,
                 class: user.class,
+                dob: user.dob,
                 topics: user.topics,
-                rating: user.rating,
-                status: user.status
-            },
-            token
-        }
-       });
-    }  catch(error){
-        console.error('Sign up failed:', error);
-        res.status(500).json({
-            success:false,
-            message: 'Server error during registration',
-            error: error.message
-        });
-    }
-};
-
-//@access - public
-//@routing - POST/api/auth/login
-//@desc login user
-
-export const login = async (req,res) => {
-    try{
-        const{email,password} = req.body;
-
-        if(!email || !password){    //kuch bhi nhi doge toh false aayega
-            return res.status(400).json({
-                success: false,
-                message: 'Please provide email and address'
-            });
-        }
-        const user= await User.findOne({email});
-        if(!user){
-            return res.status(401).json({
-                success: false,
-                message: 'Password or Username is invalid'
-            });
-        }
-        const isPassword= await bcrypt.compare(password, user.password);
-        if(!isPassword){
-            return res.status(401).json({
-                success: false,
-                message: 'Password or Username is invalid'
-            });
-        }
-        user.isOnline = true;
-        user.lastActive = new Date();
-        await user.save();
-
-        const token = generateToken(user._id);
-        res.status(200).json({
-            success: true,
-            message: 'login successfull',
-            data:{
-                user:{
-                    id: user._id,
-                    username: user.username,
-                    email: user.email,
-                    class: user.class,
-                    topics: user.topics,
-                    rating: user.rating,
-                    stats: user.stats,
-                    currentTeam: user.currentTeam
-                },
-                token
+                level: user.level,
+                xp: user.xp,
+                status: user.status,
             }
         });
     } catch(error){
-        console.error('Login error: ',error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error during login',
-            error: error.message
-        });
+        console.log('SignUp error: ', err);
+        return res.status(500).json({success: false, message: 'Server error during signUp'})
     }
+};
+export const login = async (req,res) => {
+    try{
+        const { emailOrUsername, password } = req.body;
 
-    };
-    //@desc get the current user
-    //@route GET/api/auth/me
-    //@access Private
-    export const getMe = async (req,res) => {
-        try{
-           const user = await User.findOne(req.user._id).select('-password').populate('currentTeam','name type members');
-              
-           res.status(200).json({
-             success: true,
-             data:{
-                user
-             }
-           });
-        } catch(error){
-            console.error('GetMe error:',error);
-            res.status(500).json({
+        if(!emailOrUsername || !password){
+            return res.status(400).json({
                 success: false,
-                message: 'Server error',
-                error: error.message
+                message: 'Username and password is required'
             });
         }
-    };
-//@desc  Logout user
-//@route Post/api/auth/logout
-//@access Private
+        const user = await User.findOne({
+            $or: [
+                { email: emailOrUsername.toLowerCase() },
+                { username: emailOrUsername }
+            ]
+        }).select('+password');  //including password as by default it is excluded
 
-export const logout = async (req, res) => {
-    try{
-        await User.findByIdAndUpdate(req.user._id, {
-            isOnline: false,
-            lastActive: new Date()
+        if(!user){
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid credentials'
+            });
+        }
+        const isMatch = await bcrypt.compare(password, user.password);
+        if(!isMatch){
+             return res.status(401).json({
+        success: false,
+        message: 'Invalid credentials'
         });
-     res.status(200).json({
-        success: true,
-        message: 'logout successful'
-     });
-    } catch(error){
-        console.error('Logout error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error during logout',
-            error: error.message
-        })
     }
+const token = generateToken(user._id);
+    sendTokenCookie(res, token);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Logged in successfully!',
+      user: {
+        _id: user._id,
+        username: user.username,
+        email: user.email,
+        class: user.class,
+        dob: user.dob,
+        topics: user.topics,
+        level: user.level,
+        xp: user.xp,
+        stats: user.stats,
+        friends: user.friends,
+        teams: user.teams,
+        currentTeam: user.currentTeam,
+      }
+    });
+
+  } catch (err) {
+    console.error('Login error:', err);
+    return res.status(500).json({ success: false, message: 'Server error during login' });
+  }
+};
+export const logout= async (req,res) => {
+    try{
+        res.clearCookie('token', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+    });
+
+    return res.status(200).json({ success: true, message: 'Logged out successfully' });
+
+  } catch (err) {
+    console.error('Logout error:', err);
+    return res.status(500).json({ success: false, message: 'Server error during logout' });
+  }
+};
+
+export const getMe = async (req, res) => {
+    try{
+        const user = await User.findById(req.userId)
+        .select('-password')
+      .populate('teams', 'name dp level topic')
+      .populate('currentTeam', 'name dp level topic members')
+      .populate('friends', 'username level isOnline lastActive');
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    return res.status(200).json({ success: true, user });
+
+  } catch (err) {
+    console.error('GetMe error:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
 };

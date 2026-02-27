@@ -1,3 +1,4 @@
+
 import mongoose from 'mongoose';
 
 const teamSchema = new mongoose.Schema({
@@ -7,63 +8,69 @@ const teamSchema = new mongoose.Schema({
     unique: true,
     trim: true,
     minlength: 3,
-    maxlength: 30
+    maxlength: 30,
   },
   level: {
     type: Number,
-default: 0,
-min:1
+    default: 1,
+    min: 1,
   },
-  // removed rating
   members: [{
-  user: { type: Schema.Types.ObjectId, ref: 'User' },
-  role: {
-    type: String,
-    enum: ['leader', 'member'], // or just 'leader' vs 'member'
-    default: 'member'
-  },
-  status: { type: String, enum: ['active', 'muted', 'kicked'], default: 'active' }
-}],
+    user: {
+      type: mongoose.Schema.Types.ObjectId,   // ← fixed
+      ref: 'User',
+    },
+    role: {
+      type: String,
+      enum: ['leader', 'member'],
+      default: 'member',
+    },
+    status: {
+      type: String,
+      enum: ['active', 'muted', 'kicked'],
+      default: 'active',
+    },
+  }],
   maxMembers: {
     type: Number,
-    default: 4  // For squad mode (max 4 players)
+    default: 4,
   },
-  topic:{
+  topics: [{
     type: String,
-    required: true
-  },
-  // removed active...coz team players that are users should be active not the whole team
-  //removed messageSchema so that people can just not only send text, but pdf,voice,etc etc
-  dp:{
+    required: true,
+  }],
+  dp: {
     type: String,
-    default: "any_url",
-    trim: true
+    default: '',
+    trim: true,
   },
-  minPlayerLevelRequired:{
+  minPlayerLevelRequired: {
     type: Number,
-    default:0
+    default: 1,
   },
-  totalWon:{
+  totalWon: {
     type: Number,
-    default: 0
+    default: 0,
   },
-  totalLoss:{
+  totalLoss: {
     type: Number,
-    default: 0
+    default: 0,
   },
-  draws:{
+  draws: {
     type: Number,
-    default:0
+    default: 0,
   },
-}, {
-  timestamps: true
-});
+}, { timestamps: true });
 
-// Virtual field to check if team is full
-teamSchema.virtual('isFull').get(function() {
+// ── Virtual: is team full? ──
+teamSchema.virtual('isFull').get(function () {
   return this.members.length >= this.maxMembers;
 });
 
-const Team = mongoose.model('Team', teamSchema);
+// ── Virtual: get leader ──
+teamSchema.virtual('leader').get(function () {
+  return this.members.find(m => m.role === 'leader');
+});
 
+const Team = mongoose.model('Team', teamSchema);
 export default Team;
