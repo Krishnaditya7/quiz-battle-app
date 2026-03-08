@@ -1,5 +1,4 @@
 import jwt from 'jsonwebtoken';
-import Users from '../models/Users.js';
 import User from '../models/Users.js';
 
 const protect = async (req,res,next) => {
@@ -16,12 +15,12 @@ const protect = async (req,res,next) => {
         }
         if(!token){
             return res.status(401).json({
-                success: true,
+                success: false,
                 message: 'Please Log-in'
             });
         }
         // verify token
-        const decoded = jwt.verify(token, protectrocess.env.JWT_SECRET);
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
         //checking if user still exists
         const user = await User.findById(decoded.userId).select('-password');

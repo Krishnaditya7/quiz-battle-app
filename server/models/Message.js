@@ -27,7 +27,7 @@ const messageSchema = new mongoose.Schema({
     fileName: String,
     mimeType: String,
     fileSize: Number,
-    Duration: Number,
+    duration: Number,
 
     thumbnailURL: String,
 
@@ -43,5 +43,5 @@ const messageSchema = new mongoose.Schema({
         index: true
     }
 });
-const Msg = mongoose.model('Msg',messageSchema);
-export default Msg;
+const Message = mongoose.model('Message',messageSchema);
+export default Message;

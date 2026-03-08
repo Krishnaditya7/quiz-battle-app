@@ -2,20 +2,19 @@ import express from 'express';
 import http from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import cookieParser from 'cookie-parser';
 
-import { registerGameSockets } from './utils/socketGameHandler.js';
+import { registerGameSockets } from './utils/socketGameService.js';
 import authRoutes from './routes/authRoutes.js';
 import teamRoutes from './routes/teamRoutes.js';
-import messageRoutes from './routes/messageRoutes.js';
-import matchRoutes from './routes/matchRoutes.js';
-import notificationRoutes from './routes/notificationRoutes.js';
+import messageRoutes from './routes/Messageroutes.js';
+import matchRoutes from './routes/Matchroutes.js';
+import notificationRoutes from './routes/Notificationroutes.js';
 import gameRoutes from './routes/Gameroutes.js';
 import friendRoutes from './routes/Friendroutes.js';
-
-dotenv.config();
+import leaderboardRoutes from './routes/leaderboardRoutes.js';
+import { translateToEnglish, computeAIAnswer, generateDiscussionQuestion, judgeDebate } from './utils/aiHelpers.js';
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -45,6 +44,48 @@ app.use('/api/match', matchRoutes);
 app.use('/api/notification', notificationRoutes);
 app.use('/api/game', gameRoutes);
 app.use('/api/friend', friendRoutes);
+app.use('/api/leaderboard', leaderboardRoutes);
+app.post('/test/translate', async (req, res) => {
+  try {
+    const result = await translateToEnglish(req.body.text);
+    res.json({ original: req.body.text, translated: result });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/test/answer', async (req, res) => {
+  try {
+    const result = await computeAIAnswer(req.body.question);
+    res.json({ question: req.body.question, answer: result });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/test/discussion', async (req, res) => {
+  try {
+    const result = await generateDiscussionQuestion(req.body.topic, 1);
+    res.json({ topic: req.body.topic, question: result });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/test/debate', async (req, res) => {
+  try {
+    const result = await judgeDebate(
+      'Deforestation',
+      'for',
+      'against',
+      ['Creates jobs', 'Economic growth'],
+      ['Destroys ecosystems', 'Climate change']
+    );
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ── Health check ──
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
@@ -62,3 +103,5 @@ const PORT = process.env.PORT || 5000;
 httpServer.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
+//TODO -> import node-cron 

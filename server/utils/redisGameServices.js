@@ -7,6 +7,7 @@
 import redis from '../config/redis.js';
 import K from '../config/redisKeys.js';
 import { v4 as uuid } from 'uuid';
+import User from '../models/Users.js';
 
 // ─────────────────────────────────────────────
 // USER PRESENCE
@@ -43,9 +44,13 @@ export const isUserOnline = async (userId) => {
 // MATCHMAKING QUEUE
 // ─────────────────────────────────────────────
 
-export const addToQueue = async (userId, { username, level, topic, questionCount, opponentType, playerClass, teamId = null }) => {
-  const queueKey = K.matchQueue(topic, questionCount, opponentType, playerClass);
-
+export const addToQueue = async (userId, queueData) => {
+  const { 
+    username, level, topic, questionCount, playerCount, opponentType, 
+    gameMode, stance, playerClass, teamId, onlineTeamMembers 
+  } = queueData;
+  
+  const queueKey = K.matchQueue(topic, questionCount, gameMode);
   // Store full entry data
   await redis.hset(K.queueEntry(userId), {
     userId,
@@ -53,9 +58,13 @@ export const addToQueue = async (userId, { username, level, topic, questionCount
     level,
     topic,
     questionCount,
+    playerCount,
     opponentType,
+    gameMode,
+    stance: stance || '',
     class: playerClass,
     teamId: teamId || '',
+    onlineTeamMembers,
     joinedAt: Date.now(),
   });
   await redis.expire(K.queueEntry(userId), 180); // 3 min queue timeout
@@ -67,19 +76,40 @@ export const addToQueue = async (userId, { username, level, topic, questionCount
   return queueKey;
 };
 
-export const removeFromQueue = async (userId, topic, questionCount, opponentType, playerClass) => {
-  const queueKey = K.matchQueue(topic, questionCount, opponentType, playerClass);
+export const removeFromQueue = async (userId, topic, questionCount, gameMode) => {
+  const queueKey = K.matchQueue(topic, questionCount, gameMode);
   await redis.lrem(queueKey, 0, userId);
   await redis.del(K.queueEntry(userId));
 };
 
-export const getQueueLength = async (topic, questionCount, opponentType, playerClass) => {
-  return await redis.llen(K.matchQueue(topic, questionCount, opponentType, playerClass));
+export const getQueueLength = async (topic, questionCount, gameMode) => {
+  return await redis.llen(K.matchQueue(topic, questionCount, gameMode));
+};
+export const getAllQueueEntriesForTopic = async (topic) => {
+  // Get all queue keys matching this topic
+  const pattern = `queue:${topic}:*`;
+  const queueKeys = await redis.keys(pattern);
+  
+  const allEntries = [];
+  
+  for (const queueKey of queueKeys) {
+    // Get all userIds in this queue
+    const userIds = await redis.lrange(queueKey, 0, -1);
+    
+    for (const userId of userIds) {
+      const entryData = await redis.hgetall(K.queueEntry(userId));
+      if (entryData && entryData.userId) {
+        allEntries.push(entryData);
+      }
+    }
+  }
+  
+  return allEntries;
 };
 
-export const getQueueEntries = async (topic, questionCount, opponentType, playerClass) => {
-  const queueKey = K.matchQueue(topic, questionCount, opponentType, playerClass);
-  const userIds = await redis.lrange(queueKey, 0, -1);
+export const getQueueEntries = async (topic, questionCount, gameMode) => {
+  const queueKey = K.matchQueue(topic, questionCount, gameMode);
+  const userIds = await redis.lrange(queueKey, 0, -1); // Get all userIds in this queue
   if (!userIds.length) return [];
 
   const entries = await Promise.all(
@@ -98,7 +128,7 @@ export const getUserQueueEntry = async (userId) => {
 // TEMPORARY TEAM (solo players grouped for duo/trio/squad)
 // ─────────────────────────────────────────────
 
-export const createTempTeam = async (members, topic, questionCount) => {
+export const createTempTeam = async (topic, questionCount, opponentType, playerCount) => {
   const tempTeamId = uuid();
   await redis.hset(K.tempTeam(tempTeamId), {
     tempTeamId,
@@ -342,7 +372,9 @@ export const addTeamPoint = async (gameId, teamKey) => {
   // teamKey = 'teamA' or 'teamB'
   return await redis.hincrby(K.teamScores(gameId), teamKey, 1);
 };
-
+export const setTeamScore = async (gameId, teamKey, score) => {
+    await redis.hset(K.teamScores(gameId), teamKey, score);
+};
 export const getPlayerScores = async (gameId) => {
   return await redis.hgetall(K.playerScores(gameId));
 };
@@ -533,3 +565,4 @@ export const areBothLeadersReady = async (gameId) => {
 export const clearLeaderReadyStates = async (gameId) => {
   await redis.del(`game:${gameId}:leadersReady`);
 };
+

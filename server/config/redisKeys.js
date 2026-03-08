@@ -144,6 +144,7 @@ const K = {
 
   // List  → [ { question, correctAnswer, askedBy, answeredBy, ... }, ... ]
   questionHistory: (gameId) => `game:${gameId}:questionHistory`,
+  leaderboards : (type) => `leaderboard:${type}`,
 
 };
 

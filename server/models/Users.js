@@ -17,6 +17,15 @@ const userSchema = new mongoose.Schema({
     lowercase: true,
     trim: true,
   },
+  bio:{
+    type: String,
+    maxlength: 500,
+    default : ''
+  },
+  profilePic: {
+    type: String,
+    default: ''
+  },
   password: {
     type: String,
     required: true,
@@ -35,6 +44,31 @@ const userSchema = new mongoose.Schema({
   topics: [{
     type: String,
     required: true,
+    enum: ['JavaScript',
+'Python',
+'Java',
+'C++',
+'Data Structures',
+'Algorithms',
+  
+// School Subjects
+'Mathematics',
+'Physics',
+'Chemistry',
+'Biology',
+'History',
+'Geography',
+'English',
+'Hindi',
+  
+// Other
+'General Knowledge',
+'Current Affairs',
+'Science',
+'Technology',
+'Sports',
+'Movies',
+'Music'],
   }],
   xp: {
     type: Number,

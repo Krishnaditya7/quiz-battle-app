@@ -44,6 +44,8 @@ export const createTeam = async (req, res) => {
     }
 
     // ── Create team ──
+
+  const user = await User.findById(userId);
     const team = await Team.create({
       name,
       maxMembers: maxMembers || 4,
@@ -151,7 +153,7 @@ export const browseTeams = async (req, res) => {
       return true;
     });
 
-    return res.status(200).json({ success: true, teams });
+    return res.status(200).json({ success: true, teams : teams });
 
   } catch (err) {
     console.error('Browse teams error:', err);
@@ -589,9 +591,10 @@ export const setCurrentTeam = async (req, res) => {
     const userId = req.userId;
 
     const user = await User.findById(userId);
-    if (!user.teams.includes(teamId)) {
-      return res.status(403).json({ success: false, message: 'You are not in this team' });
-    }
+
+  if (!user.teams.map(t => t.toString()).includes(teamId)) {   // BUG FIX 2: .includes() on ObjectId array needs toString comparison
+            return res.status(403).json({ success: false, message: 'You are not in this team' });
+        }
 
     user.currentTeam = teamId;
     await user.save();
@@ -608,16 +611,21 @@ export const setCurrentTeam = async (req, res) => {
 // POST /api/team/play-solo
 // User switches to solo mode (clears currentTeam)
 // ─────────────────────────────────────────────
+// Set current team to null (play solo)
 export const playSolo = async (req, res) => {
   try {
     const userId = req.userId;
 
     await User.findByIdAndUpdate(userId, { currentTeam: null });
 
-    return res.status(200).json({ success: true, message: 'Switched to solo mode' });
-
+    res.json({
+      success: true,
+      message: 'Playing solo - current team cleared'
+    });
   } catch (err) {
-    console.error('Play solo error:', err);
-    return res.status(500).json({ success: false, message: 'Server error' });
+    res.status(500).json({
+      success: false,
+      message: 'Failed to clear team'
+    });
   }
 };

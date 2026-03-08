@@ -6,7 +6,7 @@
 
 import User from '../models/Users.js';
 import Team from '../models/Team.js';
-import * as R from '../utils/redisGameService.js';
+import * as R from '../utils/redisGameServices.js';
 
 // ─────────────────────────────────────────────
 // POST /api/match/queue/join
@@ -18,14 +18,21 @@ import * as R from '../utils/redisGameService.js';
 // ─────────────────────────────────────────────
 export const joinQueue = async (req, res) => {
   try {
-    const { topic, questionCount, opponentType, playMode, gameMode, stance, topicCategory } = req.body;
+    const { topic, questionCount, opponentType, playerCount, gameMode, stance } = req.body;
     const userId = req.userId;
 
     // ── Validate ──
-    if (!topic || !playMode || !gameMode || !topicCategory) {
+    if (!topic || !questionCount || !gameMode || !playerCount || !opponentType) {
       return res.status(400).json({
         success: false,
-        message: 'topic, playMode, gameMode, and topicCategory are required',
+        message: 'topic, questionCount, gameMode, playerCount, and opponentType are required',
+      });
+    }
+
+    if (playerCount < 1 || playerCount > 4) {
+      return res.status(400).json({
+        success: false,
+        message: 'playerCount must be 1-4',
       });
     }
 
@@ -37,104 +44,58 @@ export const joinQueue = async (req, res) => {
       });
     }
 
-    const validCategories = ['entertainment', 'learning'];
-    if (!validCategories.includes(topicCategory)) {
-      return res.status(400).json({
-        success: false,
-        message: 'topicCategory must be entertainment or learning',
-      });
-    }
-
-    // opponentType NOT required for discussion mode
-    if (gameMode !== 'discussion') {
-      if (!opponentType) {
-        return res.status(400).json({
-          success: false,
-          message: 'opponentType is required for quiz and debate modes',
-        });
-      }
-
-      const validOpponentTypes = ['solo', 'duo', 'trio', 'squad', 'default'];
-      if (!validOpponentTypes.includes(opponentType)) {
-        return res.status(400).json({
-          success: false,
-          message: 'opponentType must be solo, duo, trio, squad, or default',
-        });
-      }
-    }
-
-    // ── Validate based on game mode ──
-    if (gameMode === 'quiz') {
-      const validQuestionCounts = [5, 10, 15, 20];
-      if (!validQuestionCounts.includes(parseInt(questionCount))) {
-        return res.status(400).json({
-          success: false,
-          message: 'For quiz mode, questionCount must be 5, 10, 15, or 20',
-        });
-      }
-    }
-
-    if (gameMode === 'debate') {
-      if (!stance || !['for', 'against'].includes(stance)) {
-        return res.status(400).json({
-          success: false,
-          message: 'For debate mode, stance must be "for" or "against"',
-        });
-      }
-      const validQuestionCounts = [5, 10, 15, 20];
-      if (!validQuestionCounts.includes(parseInt(questionCount))) {
-        return res.status(400).json({
-          success: false,
-          message: 'For debate mode, questionCount (number of points) must be 5, 10, 15, or 20',
-        });
-      }
-    }
-
-    if (gameMode === 'discussion') {
-      // No questionCount needed for discussion
-    }
-
-    const validOpponentTypes = ['solo', 'duo', 'trio', 'squad', 'default'];
+    const validOpponentTypes = ['solo', 'duo', 'trio', 'squad','default'];
     if (!validOpponentTypes.includes(opponentType)) {
       return res.status(400).json({
         success: false,
-        message: 'opponentType must be solo, duo, trio, squad, or default',
+        message: 'opponentType must be solo, duo, trio, or squad',
       });
     }
 
-    const user = await User.findById(userId);
+    const validQuestionCounts = [5, 10, 15, 20];
+    if (!validQuestionCounts.includes(parseInt(questionCount))) {
+      return res.status(400).json({
+        success: false,
+        message: 'questionCount must be 5, 10, 15, or 20',
+      });
+    }
+
+    if (gameMode === 'debate' && (!stance || !['for', 'against'].includes(stance))) {
+      return res.status(400).json({
+        success: false,
+        message: 'stance (for/against) required for debate',
+      });
+    }
+
+    // ── Get user ──
+    const user = await User.findById(userId).select('username level class currentTeam');
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    // ── Check if user is already in a queue ──
+    // ── Already in queue? ──
     const existingEntry = await R.getUserQueueEntry(userId);
     if (existingEntry) {
       return res.status(400).json({
         success: false,
-        message: 'You are already in a queue. Leave current queue first.',
+        message: 'Already in queue. Leave first.',
       });
     }
 
     let teamId = null;
+    let playerClass = user.class;
     let teamLevel = user.level;
-    let onlineTeamMembers = []; // ← ADDED: track who's actually online
+    let onlineTeamMembers = [];
 
-    // ── If playing as team, validate currentTeam ──
-    if (playMode === 'team') {
-      if (!user.currentTeam) {
-        return res.status(400).json({
-          success: false,
-          message: 'You must select a current team to play as team',
-        });
-      }
-
-      const team = await Team.findById(user.currentTeam).populate('members.user', 'level');
+    // ── 🔥 KEY FIX: Only process team if currentTeam exists ──
+    if (user.currentTeam) {
+      const team = await Team.findById(user.currentTeam).populate('members.user', 'level class username');
+      
       if (!team) {
-        return res.status(404).json({ success: false, message: 'Current team not found' });
+        return res.status(404).json({ success: false, message: 'Team not found' });
       }
 
-      // Check if user is leader (only leader can queue the team)
+      // Check if leader
       const member = team.members.find(m => m.user._id.toString() === userId);
       if (!member || member.role !== 'leader') {
         return res.status(403).json({
@@ -143,19 +104,23 @@ export const joinQueue = async (req, res) => {
         });
       }
 
-      // ← CRITICAL FIX: Only include ONLINE members who are NOT in another game
+      // Get ONLINE members NOT in another game
       const onlineMembers = [];
       for (const m of team.members) {
         const memberId = m.user._id.toString();
         const isOnline = await R.isUserOnline(memberId);
         
         if (isOnline) {
-          // Check if user is already in another game
           const userData = await R.getUserOnlineData(memberId);
           const isInGame = userData?.isInGame === 'true';
           
           if (!isInGame) {
-            onlineMembers.push(memberId);
+            onlineMembers.push({
+              userId: memberId,
+              username: m.user.username,
+              level: m.user.level,
+              class: m.user.class,
+            });
           }
         }
       }
@@ -163,47 +128,49 @@ export const joinQueue = async (req, res) => {
       if (onlineMembers.length === 0) {
         return res.status(400).json({
           success: false,
-          message: 'No team members are available (all are offline or in another game)',
+          message: 'No team members available',
         });
       }
 
-      // Set currentTeam for ALL available online members (not just leader)
-      await Promise.all(
-        onlineMembers.map(memberId => 
-          User.findByIdAndUpdate(memberId, { currentTeam: user.currentTeam })
-        )
-      );
+      // Calculate average class
+      const totalClass = onlineMembers.reduce((sum, m) => sum + m.class, 0);
+      playerClass = Math.round(totalClass / onlineMembers.length);
 
-      onlineTeamMembers = onlineMembers; // ← STORE ONLINE MEMBERS
+      // Calculate average level
+      const totalLevel = onlineMembers.reduce((sum, m) => sum + m.level, 0);
+      teamLevel = Math.round(totalLevel / onlineMembers.length);
+
+      onlineTeamMembers = onlineMembers.map(m => m.userId);
       teamId = team._id.toString();
-      
-      // Calculate team level (avg of ONLINE members only)
-      const onlineMembersData = team.members.filter(m => onlineMembers.includes(m.user._id.toString()));
-      teamLevel = Math.round(
-        onlineMembersData.reduce((sum, m) => sum + m.user.level, 0) / onlineMembersData.length
-      );
     }
+    // ── If playing solo (no currentTeam), just use user's own data ──
+    // This part is already handled by default values above
 
-    // ── Add to Redis queue ──
+    // ── Add to queue ──
     await R.addToQueue(userId, {
       username: user.username,
       level: teamLevel,
+      playerClass,
       topic,
-      questionCount: gameMode === 'discussion' ? 0 : parseInt(questionCount || 0),
+      questionCount: parseInt(questionCount),
+      playerCount,
       opponentType,
-      playerClass: user.class,
-      teamId,
-      playMode,
       gameMode,
       stance: stance || null,
-      topicCategory,
-      onlineTeamMembers: onlineTeamMembers.join(','), // ← STORE IN QUEUE
+      teamId: teamId || '',
+      onlineTeamMembers: onlineTeamMembers.join(','),
     });
 
     return res.status(200).json({
       success: true,
-      message: 'Added to matchmaking queue',
-      queueData: { topic, questionCount, opponentType, playMode, gameMode, stance, topicCategory },
+      message: 'Added to queue',
+      queueData: {
+        topic,
+        questionCount,
+        playerCount,
+        opponentType,
+        gameMode,
+      },
     });
 
   } catch (err) {
@@ -233,9 +200,10 @@ export const leaveQueue = async (req, res) => {
     await R.removeFromQueue(
       userId,
       entry.topic,
+      entry.gameMode,
       entry.questionCount,
       entry.opponentType,
-      entry.playerClass
+      entry.playerCount
     );
 
     return res.status(200).json({
@@ -270,7 +238,8 @@ export const getQueueStatus = async (req, res) => {
       entry.topic,
       entry.questionCount,
       entry.opponentType,
-      entry.playerClass
+      entry.gameMode,
+      entry.playerCount
     );
 
     return res.status(200).json({

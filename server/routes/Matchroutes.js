@@ -4,7 +4,7 @@
 // ============================================================
 
 import express from 'express';
-import protect from '../middleware/authmiddleware.js';
+import protect from '../middleware/authMiddleware.js';
 import { joinQueue, leaveQueue, getQueueStatus } from '../controllers/matchController.js';
 
 const router = express.Router();

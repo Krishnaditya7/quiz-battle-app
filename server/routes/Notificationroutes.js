@@ -4,7 +4,7 @@
 // ============================================================
 
 import express from 'express';
-import protect from '../middleware/authmiddleware.js';
+import protect from '../middleware/authMiddleware.js';
 import {
   getNotifications,
   markAsRead,

@@ -1,11 +1,11 @@
 import express from 'express';
-import { login, signup, getMe, logout } from '../controllers/authController';
-import protect from '../middleware/authmiddleware';
+import { login, SignUp, getMe, logout } from '../controllers/authController.js';
+import protect from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
 //Public routes
-router.post('/signup', signup);
+router.post('/signup', SignUp);
 router.post('/login', login);
 
 //private route ke liye authentication is required

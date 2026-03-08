@@ -5,7 +5,7 @@
 
 import Game from '../models/Game.js';
 import User from '../models/Users.js';
-import * as R from '../utils/redisGameService.js';
+import * as R from '../utils/redisGameServices.js';
 
 // ─────────────────────────────────────────────
 // INTERNAL: Save completed game from Redis to MongoDB
