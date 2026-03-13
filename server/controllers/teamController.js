@@ -8,7 +8,7 @@
 import Team from '../models/Team.js';
 import User from '../models/Users.js';
 import Notification from '../models/Notification.js';
-
+import mongoose from 'mongoose';
 // ─────────────────────────────────────────────
 // HELPER: Calculate team level (avg of members)
 // ─────────────────────────────────────────────
@@ -239,7 +239,7 @@ export const requestJoinTeam = async (req, res) => {
 // Body: { userIdToApprove }
 // Team leader approves a join request
 // ─────────────────────────────────────────────
-export const approveJoinRequest = async (req, res) => {
+export const approveJoinRequest = async (req, res, io) => {
   try {
     const { teamId } = req.params;
     const { userIdToApprove } = req.body;
@@ -306,16 +306,15 @@ export const approveJoinRequest = async (req, res) => {
       message: `Your request to join ${team.name} has been approved!`,
     });
 
-    return res.status(200).json({
-      success: true,
-      message: 'Join request approved',
-      team,
-    });
+    if (io) {
+      io.to(`user:${userIdToApprove}`).emit('notification:new', { notification });
+    }
 
+    return res.status(200).json({ success: true, message: 'Approved!', team });
   } catch (err) {
-    console.error('Approve join request error:', err);
+    console.error('Approve error:', err);
     return res.status(500).json({ success: false, message: 'Server error' });
-  }
+  } 
 };
 
 // ─────────────────────────────────────────────
@@ -515,7 +514,7 @@ export const getMyTeams = async (req, res) => {
 // Body: { userIdToInvite }
 // Leader sends invite - this bypasses ALL level restrictions
 // ─────────────────────────────────────────────
-export const inviteToTeam = async (req, res) => {
+export const inviteToTeam = async (req, res,io) => {
   try {
     const { teamId } = req.params;
     const { userIdToInvite } = req.body;
@@ -526,57 +525,65 @@ export const inviteToTeam = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Team not found' });
     }
 
-    // ── Check if requester is leader ──
     const leader = team.members.find(m => m.user.toString() === leaderId);
     if (!leader || leader.role !== 'leader') {
-      return res.status(403).json({ success: false, message: 'Only leader can invite members' });
+      return res.status(403).json({ success: false, message: 'Only leader can invite' });
     }
 
-    // ── Check if team is full ──
     if (team.members.length >= team.maxMembers) {
       return res.status(400).json({ success: false, message: 'Team is full' });
     }
 
-    // ── Check if user already in team ──
     const alreadyMember = team.members.some(m => m.user.toString() === userIdToInvite);
     if (alreadyMember) {
-      return res.status(400).json({ success: false, message: 'User is already in this team' });
+      return res.status(400).json({ success: false, message: 'User already in team' });
     }
 
-    // ── Check if target user exists ──
-    const targetUser = await User.findById(userIdToInvite);
+    
+
+  const isValidId = mongoose.Types.ObjectId.isValid(userIdToInvite);
+  const targetUser = isValidId 
+  ? await User.findById(userIdToInvite)
+  : await User.findOne({ username: userIdToInvite });
+
     if (!targetUser) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
-
-    // ── Create notification for invite ──
-    // (We'll build this in Phase 5, but structure it now)
-    // For now, just add them directly since you said "they would get join automatically"
-    
-    team.members.push({
-      user: userIdToInvite,
-      role: 'member',
-      status: 'active',
+   const actualUserId = targetUser._id.toString();
+    // Check if invite already pending
+    const existingInvite = await Notification.findOne({
+      recipient: actualUserId,
+      sender: leaderId,
+      team: teamId,
+      type: 'team_invite',
+      status: 'pending'
     });
+    if (existingInvite) {
+      return res.status(400).json({ success: false, message: 'Invite already sent' });
+    }
 
-    // Recalculate team level and minPlayerLevelRequired
-    team.level = await calculateTeamLevel(team);
-    team.minPlayerLevelRequired = Math.max(1, team.level - 5);
-    await team.save();
+    const leaderUser = await User.findById(leaderId).select('username');
 
-    // Add team to user
-    await User.findByIdAndUpdate(userIdToInvite, {
-      $push: { teams: team._id },
+    // Create notification — don't add user yet
+    await Notification.create({
+      recipient: actualUserId,
+      sender: leaderId,
+      type: 'team_invite',
+      team: teamId,
+      message: `${leaderUser.username} invited you to join ${team.name}`,
+      status: 'pending',
     });
+    if (io) {
+      io.to(`user:${actualUserId}`).emit('notification:new', { Notification });
+    }
 
     return res.status(200).json({
       success: true,
-      message: 'User added to team via invite',
-      team,
+      message: 'Invite sent successfully',
     });
 
   } catch (err) {
-    console.error('Invite to team error:', err);
+    console.error('Invite error:', err);
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 };
@@ -622,10 +629,98 @@ export const playSolo = async (req, res) => {
       success: true,
       message: 'Playing solo - current team cleared'
     });
+    console.log("Aa chuka hoo tere saamne ->", userId);
   } catch (err) {
     res.status(500).json({
       success: false,
       message: 'Failed to clear team'
     });
+  }
+};
+// POST /api/team/:teamId/accept-invite
+export const acceptInvite = async (req, res,io) => {
+  try {
+    const { teamId } = req.params;
+    const userId = req.userId;
+
+    const team = await Team.findById(teamId);
+    if (!team) {
+      return res.status(404).json({ success: false, message: 'Team not found' });
+    }
+
+    if (team.members.length >= team.maxMembers) {
+      return res.status(400).json({ success: false, message: 'Team is now full' });
+    }
+
+    // Update notification status
+    await Notification.updateOne(
+      { recipient: userId, team: teamId, type: 'team_invite', status: 'pending' },
+      { status: 'accepted', isRead: true }
+    );
+
+    // Add user to team
+    team.members.push({ user: userId, role: 'member', status: 'active' });
+    team.level = await calculateTeamLevel(team);
+    team.minPlayerLevelRequired = Math.max(1, team.level - 5);
+    await team.save();
+
+    // Add team to user
+    await User.findByIdAndUpdate(userId, {
+      $push: { teams: team._id }
+    });
+
+    // Notify leader
+    const leader = team.members.find(m => m.role === 'leader');
+    const newMember = await User.findById(userId).select('username');
+    await Notification.create({
+      recipient: leader.user,
+      sender: userId,
+      type: 'team_invite_accepted',
+      team: teamId,
+      message: `${newMember.username} accepted your invite to ${team.name}`,
+    });
+     if (io) {
+      io.to(`user:${leader.user}`).emit('notification:new', { notification });
+    }
+
+    return res.status(200).json({ success: true, message: 'Joined team!', team });
+
+  } catch (err) {
+    console.error('Accept invite error:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// POST /api/team/:teamId/reject-invite
+export const rejectInvite = async (req, res,io) => {
+  try {
+    const { teamId } = req.params;
+    const userId = req.userId;
+
+    await Notification.updateOne(
+      { recipient: userId, team: teamId, type: 'team_invite', status: 'pending' },
+      { status: 'rejected', isRead: true }
+    );
+
+    // Notify leader of rejection
+    const team = await Team.findById(teamId);
+    const leader = team.members.find(m => m.role === 'leader');
+    const user = await User.findById(userId).select('username');
+
+    await Notification.create({
+      recipient: leader.user,
+      sender: userId,
+      type: 'team_invite_rejected',
+      team: teamId,
+      message: `${user.username} declined your invite to ${team.name}`,
+    });
+       if (io) {
+      io.to(`user:${leader.user}`).emit('notification:new', { notification });
+    }
+    return res.status(200).json({ success: true, message: 'Invite rejected' });
+
+  } catch (err) {
+    console.error('Reject invite error:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
   }
 };

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from "react-router-dom";
 
-export default function AuthPage() {
+export default function AuthPage({ setUser }) {
   const navigate = useNavigate();
 
   const [isLogin, setIsLogin] = useState(false);
@@ -113,7 +113,8 @@ export default function AuthPage() {
     );
 
     if (profileRes.data.user) {
-      // Ideally lift this to global context
+      setUser(profileRes.data.user);// Ideally lift this to global context
+      localStorage.setItem('user', JSON.stringify(profileRes.data.user));
       navigate("/dashboard");
     }
     } catch (err) {

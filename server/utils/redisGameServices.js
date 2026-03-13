@@ -565,4 +565,3 @@ export const areBothLeadersReady = async (gameId) => {
 export const clearLeaderReadyStates = async (gameId) => {
   await redis.del(`game:${gameId}:leadersReady`);
 };
-

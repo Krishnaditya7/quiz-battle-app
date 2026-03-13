@@ -3,8 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import Lenis from '@studio-freight/lenis';
 
-export default function HomePage() {
 
+export default function HomePage({ user: propUser}) {
+  console.log('propUser received:', propUser);
+const [currentUser, setCurrentUser] = useState(propUser ?? null);
   useEffect(() => {
     const lenis = new Lenis({
       duration: 0.8,
@@ -33,14 +35,36 @@ export default function HomePage() {
   const [topUsers, setTopUsers] = useState([]);
   const [editingBio, setEditingBio] = useState(null);
   const [newBio, setNewBio] = useState('');
-  const [currentUser, setCurrentUser] = useState(null);
-
-  const stepsRef = useRef([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+ 
+ const stepsRef = useRef([]);
   const heroRef = useRef(null);
-
   // Fetch data + scroll progress + step reveal observer
   useEffect(() => {
-    fetchCurrentUser();
+    setCurrentUser(propUser || null);
+  }, [propUser]);
+
+  useEffect(() => {
+  if (!currentUser) return;
+  
+  const fetchUnreadCount = async () => {
+    try {
+      const res = await axios.get(
+        'http://localhost:5000/api/notification/unread-count',
+        { withCredentials: true }
+      );
+      if (res.data.success) {
+        setUnreadCount(res.data.unreadCount);
+      }
+    } catch (err) {
+      console.log('Unread count error:', err);
+    }
+  };
+
+  fetchUnreadCount();
+}, [currentUser]);
+  useEffect(() => {
+  
     fetchTop3();
 
     const handleScroll = () => {
@@ -50,8 +74,8 @@ export default function HomePage() {
     };
     window.addEventListener('scroll', handleScroll, { passive: true });
 
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
+    return () =>  window.removeEventListener('scroll', handleScroll); 
+ }, []);
 
   useEffect(() => {
     const observer = new IntersectionObserver(
@@ -68,20 +92,6 @@ export default function HomePage() {
     stepsRef.current.forEach(el => el && observer.observe(el));
     return () => observer.disconnect();
   }, []);
-
-  const fetchCurrentUser = async () => {
-    try {
-      const res = await axios.get('http://localhost:5000/api/auth/me', {
-        withCredentials: true
-      });
-      if (res.data.success) {
-        setCurrentUser(res.data.user);
-      }
-    } catch (err) {
-      console.log('Not logged in');
-      setCurrentUser(null);
-    }
-  };
 
   const fetchTop3 = async () => {
     try {
@@ -118,8 +128,10 @@ export default function HomePage() {
 
   // ✅ FIXED - Now synchronous
   const isMyProfile = (topUser) => {
-    return currentUser && currentUser._id === topUser._id;
-  };
+  if (!currentUser) return false;
+  // IDs might be objects or strings, so convert both to string
+  return String(currentUser._id) === String(topUser._id);
+};
 
 
   const steps = [
@@ -162,49 +174,64 @@ const particles = useRef(
       </div>
 
       {/* Navbar */}
-      <nav className="fixed top-0 w-full z-40 backdrop-blur-xl bg-slate-950/80 border-b border-purple-500/20">
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <button 
-              onClick={() => navigate('/')}
-              className="text-2xl font-black bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent cursor-pointer"
-            >
-              ShastrAi
-            </button>
-            <div className="flex gap-8 items-center">
-              <button 
-                onClick={() => navigate('/auth')}
-                className="hover:text-purple-400 hover:scale-[1.05] transition-all duration-300 ease-[cubic-bezier(.22,1,.36,1)] font-semibold"
-              >
-                Sign Up
-              </button>
-              <button 
-                onClick={() => navigate('/game')}
-                className="hover:text-purple-400 hover:scale-[1.05] transition-all duration-300 ease-[cubic-bezier(.22,1,.36,1)] font-semibold"
-              >
-                Games
-              </button>
-              <button className="hover:text-purple-400 hover:scale-[1.05] transition-all duration-300 ease-[cubic-bezier(.22,1,.36,1)] font-semibold">
-                Notifications
-              </button>
-              <button className="hover:text-purple-400 hover:scale-[1.05] transition-all duration-300 ease-[cubic-bezier(.22,1,.36,1)] font-semibold">
-                Leaderboard
-              </button>
-              
-              {/* USER ICON */}
-              {currentUser && (
-                <button
-                  onClick={() => navigate('/dashboard')}
-                  className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-600 to-pink-600 flex items-center justify-center text-xl hover:scale-[1.05] transition-transform duration-300 ease-[cubic-bezier(.22,1,.36,1)] transition-all shadow-lg hover:shadow-purple-500/50"
-                  title={`Logged in as ${currentUser.username}`}
-                >
-                  👤
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      </nav>
+      {/* Navbar */}
+<nav className="fixed top-0 w-full z-40 backdrop-blur-xl bg-slate-950/80 border-b border-purple-500/20">
+  <div className="max-w-7xl mx-auto px-6 py-4">
+    <div className="flex items-center justify-between">
+      <button 
+        onClick={() => navigate('/')}
+        className="text-2xl font-black bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent cursor-pointer"
+      >
+        ShastrAi
+      </button>
+
+      <div className="flex gap-8 items-center">
+        {/* Show these only when NOT logged in */}
+        {!currentUser && (
+          <button 
+            onClick={() => navigate('/auth')}
+            className="hover:text-purple-400 hover:scale-[1.05] transition-all duration-300 ease-[cubic-bezier(.22,1,.36,1)] font-semibold"
+          >
+            Sign Up
+          </button>
+        )}
+
+        <button 
+          onClick={() => navigate('/game')}
+          className="hover:text-purple-400 hover:scale-[1.05] transition-all duration-300 ease-[cubic-bezier(.22,1,.36,1)] font-semibold"
+        >
+          Games
+        </button>
+
+        <button 
+         onClick={() => navigate('/notifications')}
+          className="relative hover:text-purple-400 hover:scale-[1.05] transition-all duration-300 font-semibold"
+        >
+          Notifications
+          {unreadCount > 0 && (
+            <span className="absolute -top-2 -right-3 w-4 h-4 bg-red-500 rounded-full text-xs flex items-center justify-center font-bold">
+              {unreadCount > 9 ? '9+' : unreadCount}
+            </span>
+          )}
+        </button>
+        <button className="hover:text-purple-400 hover:scale-[1.05] transition-all duration-300 ease-[cubic-bezier(.22,1,.36,1)] font-semibold">
+          Leaderboard
+        </button>
+
+        {/* Show dashboard icon only when logged in */}
+        {currentUser ? (
+          <button
+            onClick={() => navigate('/dashboard')}
+            className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-600 to-pink-600 flex items-center justify-center text-xl hover:scale-[1.05] transition-all duration-300 shadow-lg hover:shadow-purple-500/50"
+            title={`Logged in as ${currentUser.username}`}
+          >
+            👤
+          </button>
+        ) : null}
+      </div>
+    </div>
+  </div>
+</nav>
 
       {/* Hero Section */}
       <section 
@@ -342,12 +369,12 @@ animation:`float ${p.duration}s ease-in-out infinite`
           <div className="grid md:grid-cols-3 gap-8">
             {topUsers.map((topUser, index) => (
               <div
-key={topUser._id || index}
-className="group relative fade-up smooth-transform"
-style={{
-animationDelay:`${index*0.15}s`
-}}
->
+           key={topUsers._id || index}
+         className="group relative fade-up smooth-transform"
+         style={{
+          animationDelay:`${index*0.15}s`
+          }}
+          >
                 {index === 0 && (
                   <div className="absolute -top-6 left-1/2 -translate-x-1/2 z-10">
                     <div className="w-16 h-16 rounded-full bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center text-2xl font-black shadow-2xl shadow-yellow-500/50">

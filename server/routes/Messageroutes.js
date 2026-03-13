@@ -1,16 +1,12 @@
-
-
 import express from 'express';
+import { getMessages, editMessage, deleteMessage, markAllAsRead } from '../controllers/messageController.js';
 import protect from '../middleware/authMiddleware.js';
-import { sendMessage, getMessages, markAsRead } from '../controllers/messageController.js';
 
 const router = express.Router();
 
-// All message routes are protected
-router.use(protect);
-
-router.post('/send', sendMessage);
-router.get('/:teamId', getMessages);
-router.post('/:messageId/read', markAsRead);
+router.get('/:teamId/messages', protect, getMessages);        // load history
+router.patch('/message/:messageId', protect, editMessage);    // edit
+router.delete('/message/:messageId', protect, deleteMessage); // delete
+router.patch('/:teamId/read', protect, markAllAsRead);        // mark all read
 
 export default router;

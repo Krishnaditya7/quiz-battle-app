@@ -1,41 +1,33 @@
-// ============================================================
-// TEAM ROUTES
-// Base: /api/team
-// ============================================================
-
 import express from 'express';
-import protect from '../middleware/authMiddleware.js';
+import  protect  from '../middleware/authMiddleware.js';
 import {
-  createTeam,
-  getTeam,
-  browseTeams,
-  requestJoinTeam,
-  approveJoinRequest,
-  leaveTeam,
-  kickMember,
-  inviteToTeam,
-  updateTeam,
-  getMyTeams,
-  setCurrentTeam,
-  playSolo,
+  createTeam, getTeam, browseTeams, requestJoinTeam,
+  approveJoinRequest, leaveTeam, kickMember, updateTeam,
+  getMyTeams, inviteToTeam, setCurrentTeam, playSolo,
+  acceptInvite, rejectInvite
 } from '../controllers/teamController.js';
 
-const router = express.Router();
+// Export a function that accepts io
+export const createTeamRoutes = (io) => {
+  const router = express.Router();
 
-// All team routes are protected
-router.use(protect);
+  router.post('/create', protect, createTeam);
+  router.get('/my-teams', protect, getMyTeams);
+  router.get('/browse', protect, browseTeams);
+  router.post('/play-solo', protect, playSolo);
+  router.get('/:teamId', protect, getTeam);
+  router.post('/:teamId/join-request', protect, requestJoinTeam);
+  
+  // Pass io to controllers that need real-time notifications
+  router.post('/:teamId/approve-join', protect, (req, res) => approveJoinRequest(req, res, io));
+  router.post('/:teamId/invite', protect, (req, res) => inviteToTeam(req, res, io));
+  router.post('/:teamId/accept-invite', protect, (req, res) => acceptInvite(req, res, io));
+  router.post('/:teamId/reject-invite', protect, (req, res) => rejectInvite(req, res, io));
+  
+  router.post('/:teamId/kick', protect, kickMember);
+  router.post('/:teamId/leave', protect, leaveTeam);
+  router.patch('/:teamId/update', protect, updateTeam);
+  router.post('/:teamId/set-current', protect, setCurrentTeam);
 
-router.post('/create', createTeam);
-router.get('/browse', browseTeams);
-router.get('/my-teams', getMyTeams);
-router.get('/:teamId', getTeam);
-router.post('/:teamId/join-request', requestJoinTeam);
-router.post('/:teamId/approve-join', approveJoinRequest);
-router.post('/:teamId/leave', leaveTeam);
-router.post('/:teamId/kick', kickMember);
-router.post('/:teamId/invite', inviteToTeam);
-router.patch('/:teamId/update', updateTeam);
-router.post('/:teamId/set-current', setCurrentTeam);
-router.post('/play-solo', playSolo);
-
-export default router;
+  return router;
+};

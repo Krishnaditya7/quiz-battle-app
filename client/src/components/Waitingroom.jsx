@@ -1,23 +1,31 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import io from 'socket.io-client';
 
-export default function WaitingRoom() {
+export default function WaitingRoom({ socket, user}) {
   const navigate = useNavigate();
   const location = useLocation();
   const { queueData, myTeam } = location.state || {};
   
-  const [socket, setSocket] = useState(null);
   const [matchFound, setMatchFound] = useState(false);
   const [opponentTeam, setOpponentTeam] = useState(null);
   const [countdown, setCountdown] = useState(null);
+  const [queueTime, setQueueTime] = useState(0);
 
   useEffect(() => {
-    const newSocket = io('http://localhost:5000', {
-      withCredentials: true
-    });
+    const timer = setInterval(() => {
+      setQueueTime(prev => prev + 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
-    newSocket.on('match:found', (data) => {
+  const formatTime = (seconds) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+  useEffect(() => {
+   if (!socket) return;
+    socket.on('match:found', (data) => {
       setMatchFound(true);
       setOpponentTeam(data);
       
@@ -34,15 +42,22 @@ export default function WaitingRoom() {
       }, 1000);
     });
 
-    setSocket(newSocket);
-
-    return () => newSocket.close();
-  }, [navigate]);
-
-  const handleLeaveQueue = async () => {
-    if (socket) {
-      socket.emit('queue:leave');
+    return () => socket.off('match:found');
+  }, [socket,navigate]);
+const handleLeaveQueue = () => {
+    if (!socket || !user || !queueData) {
+      navigate('/game');
+      return;
     }
+
+    // Now sending all required data
+    socket.emit('queue:leave', {
+      userId: user._id,
+      topic: queueData.topic,
+      questionCount: queueData.questionCount,
+      gameMode: queueData.gameMode,
+    });
+
     navigate('/game');
   };
 
@@ -67,7 +82,7 @@ export default function WaitingRoom() {
           <div className="grid grid-cols-3 gap-8 items-center">
             {/* MY TEAM (Right Side) */}
             <div className="space-y-4">
-              <h3 className="text-2xl font-black text-center text-purple-300 mb-6">YOUR TEAM</h3>
+              <h3 className="text-2xl font-black text-center text-purple-300 mb-6">{myTeam?.name ? myTeam.name.toUpperCase() : 'MY TEAM'}</h3>
               {Array.from({ length: queueData?.playerCount || 1 }).map((_, index) => (
                 <div
                   key={index}

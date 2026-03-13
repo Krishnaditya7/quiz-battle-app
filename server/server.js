@@ -7,14 +7,15 @@ import cookieParser from 'cookie-parser';
 
 import { registerGameSockets } from './utils/socketGameService.js';
 import authRoutes from './routes/authRoutes.js';
-import teamRoutes from './routes/teamRoutes.js';
 import messageRoutes from './routes/Messageroutes.js';
 import matchRoutes from './routes/Matchroutes.js';
-import notificationRoutes from './routes/Notificationroutes.js';
 import gameRoutes from './routes/Gameroutes.js';
 import friendRoutes from './routes/Friendroutes.js';
 import leaderboardRoutes from './routes/leaderboardRoutes.js';
 import { translateToEnglish, computeAIAnswer, generateDiscussionQuestion, judgeDebate } from './utils/aiHelpers.js';
+ import { createTeamRoutes } from './routes/teamRoutes.js';
+import Notificationroutes from './routes/Notificationroutes.js';
+import userRoutes from './routes/userRoutes.js'
 
 const app = express();
 const httpServer = http.createServer(app);
@@ -38,13 +39,14 @@ app.use(cookieParser());   // ← reads JWT from cookies
 
 // ── Routes ──
 app.use('/api/auth', authRoutes);
-app.use('/api/team', teamRoutes);
-app.use('/api/message', messageRoutes);
+ app.use('/api/team', createTeamRoutes(io));
+app.use('/api/chat', messageRoutes);
 app.use('/api/match', matchRoutes);
-app.use('/api/notification', notificationRoutes);
+app.use('/api/notification', Notificationroutes);
 app.use('/api/game', gameRoutes);
 app.use('/api/friend', friendRoutes);
 app.use('/api/leaderboard', leaderboardRoutes);
+app.use('/api/user',userRoutes);
 app.post('/test/translate', async (req, res) => {
   try {
     const result = await translateToEnglish(req.body.text);

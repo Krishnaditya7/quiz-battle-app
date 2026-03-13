@@ -1,17 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+
 import TeamManagementModal from './CreateTeam';
 import JoinTeamsModal from './JoinTeam';
 
-export default function GamePage() {
+export default function GamePage({socket, user}) {
   const navigate = useNavigate();
-  const user = JSON.parse(localStorage.getItem('user'));
   
   const [showSoloModal, setShowSoloModal] = useState(false);
   const [showTeamsList, setShowTeamsList] = useState(false);  // ← For TeamManagementModal
   const [showJoinTeams, setShowJoinTeams] = useState(false);  // ← For JoinTeamsModal
-  
+  const [isQueuing, setIsQueuing] = useState(false);
+
   const [soloQueueData, setSoloQueueData] = useState({
     topic: '',
     questionCount: 10,
@@ -25,42 +25,77 @@ export default function GamePage() {
     'Math', 'Science', 'Physics', 'Chemistry', 'Biology',
     'History', 'Geography', 'English', 'Computer Science'
   ];
+useEffect(() => {
+    if (!socket) return;
 
-  const handleSoloQueue = async () => {
-    try {
-      if (!soloQueueData.topic || !soloQueueData.gameMode) {
-        alert('Please select topic and game mode');
-        return;
+    socket.on('match:queued', ({ message }) => {
+      console.log('Queued:', message);
+      navigate('/waiting-room', {
+        state: { queueData: soloQueueData,
+         myTeam: {
+        name: user.currentTeam ? 'My Team' : user.username,
+        members: [{
+          username: user.username,
+          level: user.level,
+          avatar: user.profilePic || '👤'
+        }]
       }
-
-      if (soloQueueData.gameMode === 'debate' && !soloQueueData.stance) {
-        alert('Please select stance for debate');
-        return;
-      }
-     await axios.post('http://localhost:5000/api/team/play-solo', {}, {
-      withCredentials: true
+     }
+      });
     });
-      const res = await axios.post('http://localhost:5000/api/match/queue/join', {
-        topic: soloQueueData.topic,
-        questionCount: soloQueueData.questionCount,
-        playerCount: soloQueueData.playerCount,
-        gameMode: soloQueueData.gameMode,
-        stance: soloQueueData.stance,
-        opponentType: 'default'
-      }, { withCredentials: true });
 
-      if (res.data.success) {
-        navigate('/waiting-room', { 
-          state: { 
-            queueData: soloQueueData,
-            myTeam: null
-          } 
-        });
-      }
-    } catch (err) {
-      alert(err.response?.data?.message || 'Failed to join queue');
+    socket.on('error', ({ message }) => {
+      alert(message);
+      setIsQueuing(false);
+    });
+
+    return () => {
+      socket.off('match:queued');
+      socket.off('error');
+    };
+  }, [socket, soloQueueData]);
+  
+  const handleSoloQueue = () => {
+    if (!socket) {
+      alert('Not connected to server!');
+      return;
     }
+
+    if (!soloQueueData.topic || !soloQueueData.gameMode) {
+      alert('Please select topic and game mode');
+      return;
+    }
+
+    if (soloQueueData.gameMode === 'debate' && !soloQueueData.stance) {
+      alert('Please select stance for debate');
+      return;
+    }
+
+    setIsQueuing(true);
+
+    // Single socket emit — no REST API needed
+    sessionStorage.setItem('pendingQueueData', JSON.stringify(soloQueueData));
+    sessionStorage.setItem('pendingMyTeam', JSON.stringify({
+    name: user.username,
+    members: [{ username: user.username, level: user.level, avatar: user.profilePic || '👤' }]
+}));
+
+    socket.emit('match:joinQueue', {
+      userId: user._id,
+      username: user.username,
+      level: user.level ?? 1,
+      playerClass: user.class,
+      topic: soloQueueData.topic,
+      questionCount: soloQueueData.questionCount,
+      playerCount: soloQueueData.playerCount,
+      gameMode: soloQueueData.gameMode,
+      stance: soloQueueData.stance || null,
+      opponentType: soloQueueData.opponentType,
+      teamId: null,
+      onlineTeamMembers: [],
+    });
   };
+
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-purple-950 to-slate-900 text-white p-8">
@@ -241,10 +276,10 @@ export default function GamePage() {
                 {/* Submit */}
                 <button
                   onClick={handleSoloQueue}
-                  disabled={!soloQueueData.topic || !soloQueueData.gameMode}
+                  disabled={!socket || !user ||!soloQueueData.topic || !soloQueueData.gameMode || isQueuing}
                   className="w-full py-4 bg-gradient-to-r from-purple-600 to-pink-600 rounded-xl font-bold text-lg hover:shadow-2xl hover:shadow-purple-500/50 transition-all mt-6 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  FIND MATCH
+                  {!user ? 'Loading...' : isQueuing ? 'SEARCHING...' : 'FIND MATCH'}
                 </button>
               </div>
             </div>
@@ -255,6 +290,8 @@ export default function GamePage() {
         <TeamManagementModal 
           show={showTeamsList} 
           onClose={() => setShowTeamsList(false)} 
+          socket={socket}
+          user={user}
         />
 
         {/* JOIN TEAMS MODAL */}
