@@ -25,35 +25,6 @@ export default function GamePage({socket, user}) {
     'Math', 'Science', 'Physics', 'Chemistry', 'Biology',
     'History', 'Geography', 'English', 'Computer Science'
   ];
-useEffect(() => {
-    if (!socket) return;
-
-    socket.on('match:queued', ({ message }) => {
-      console.log('Queued:', message);
-      navigate('/waiting-room', {
-        state: { queueData: soloQueueData,
-         myTeam: {
-        name: user.currentTeam ? 'My Team' : user.username,
-        members: [{
-          username: user.username,
-          level: user.level,
-          avatar: user.profilePic || '👤'
-        }]
-      }
-     }
-      });
-    });
-
-    socket.on('error', ({ message }) => {
-      alert(message);
-      setIsQueuing(false);
-    });
-
-    return () => {
-      socket.off('match:queued');
-      socket.off('error');
-    };
-  }, [socket, soloQueueData]);
   
   const handleSoloQueue = () => {
     if (!socket) {

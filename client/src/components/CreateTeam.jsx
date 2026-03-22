@@ -272,37 +272,11 @@ const formatDate = (dateStr) => {
       );
 
       // Step 2 — listen for queue confirmation
-      socket.once('match:queued', ({ message }) => {
-        console.log('Team queued:', message);
-        setShowQueueModal(false);
-        onClose();
-        navigate('/waiting-room', {
-          state: {
-            queueData,
-            myTeam: {
-              name: selectedTeam.name,
-              members: selectedTeam.members.map(m => ({
-                username: m.user.username,
-                level: m.user.level,
-                avatar: m.user.profilePic || '👤'
-              }))
-            }
-          }
-        });
-      });
 
       socket.once('error', ({ message }) => {
         alert(message);
       });
     sessionStorage.setItem('pendingQueueData', JSON.stringify(queueData));
-    sessionStorage.setItem('pendingMyTeam', JSON.stringify({
-     name: selectedTeam.name,
-     members: selectedTeam.members.map(m => ({
-       username: m.user.username,
-       level: m.user.level,
-       avatar: m.user.profilePic || '👤'
-  }))
-}));
 
       // Step 3 — emit socket event instead of REST
       socket.emit('match:joinQueue', {

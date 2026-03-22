@@ -94,7 +94,7 @@ export async function generateDiscussionQuestion(topic, questionNumber) {
   try {
     const prompt = `Generate an engaging discussion question #${questionNumber} about "${topic}". The question should be open-ended and thought-provoking. Question:`;
     
-    const result = await hf.textGeneration({
+    const result = await hf.chatCompletion({
       model: AI_MODELS.textGeneration,
       inputs: prompt,
       parameters: {
@@ -112,7 +112,7 @@ export async function generateDiscussionQuestion(topic, questionNumber) {
     return question || `Discussion Question ${questionNumber}: What are your thoughts on ${topic}?`;
     
   } catch (error) {
-    console.error('Question generation error:', error);
+    console.error('Question generation error:', error.message);
     
     // Fallback: Simple template questions
     const templates = [

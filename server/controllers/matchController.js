@@ -1,11 +1,9 @@
 // ============================================================
 // MATCHMAKING CONTROLLER
-// Handles: join queue, leave queue, get queue status
+// Handles:  get queue status
 // Actual matching happens in Socket.IO (socketGameHandler.js)
 // ============================================================
 
-import User from '../models/Users.js';
-import Team from '../models/Team.js';
 import * as R from '../utils/redisGameServices.js';
 
 // ─────────────────────────────────────────────

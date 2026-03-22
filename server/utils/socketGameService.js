@@ -53,231 +53,283 @@ export const registerGameSockets = (io) => {
             socket.join(`user:${userId}`);
             console.log(`👤 ${username} is online`);
         });
-        
-        socket.on('match:joinQueue', async ({userId, topic, questionCount, gameMode, opponentType, playerCount, stance}) => {
+socket.on('match:joinQueue', async ({ userId, topic, questionCount, 
+  gameMode, opponentType, playerCount, stance, teamId }) => {
   try {
+
     // ── Validate ──
-    if (!topic || !questionCount || !gameMode || !playerCount || !opponentType) {
+    if (!userId || !topic || !questionCount || !gameMode || !playerCount || !opponentType) {
       return socket.emit('error', { message: 'Missing required fields' });
     }
-
     if (!['quiz', 'debate', 'discussion'].includes(gameMode)) {
       return socket.emit('error', { message: 'Invalid game mode' });
     }
-
     if (!['solo', 'duo', 'trio', 'squad', 'default'].includes(opponentType)) {
       return socket.emit('error', { message: 'Invalid opponent type' });
     }
-
     if (![5, 10, 15, 20].includes(parseInt(questionCount))) {
       return socket.emit('error', { message: 'Invalid question count' });
     }
-
     if (gameMode === 'debate' && (!stance || !['for', 'against'].includes(stance))) {
       return socket.emit('error', { message: 'Stance required for debate' });
     }
-
     if (playerCount < 1 || playerCount > 4) {
       return socket.emit('error', { message: 'playerCount must be 1-4' });
     }
 
-    // ── Check already in queue ──
+    // ── Already in queue? ──
     const existingEntry = await R.getUserQueueEntry(userId);
     if (existingEntry) {
       return socket.emit('error', { message: 'Already in queue. Leave first.' });
     }
 
-    // ── Get user from DB ──
-    const user = await User.findById(userId).select('username level class currentTeam');
+    // ── Get user ──
+    const user = await User.findById(userId)
+      .select('username level class currentTeam');
     if (!user) {
       return socket.emit('error', { message: 'User not found' });
     }
-
     socket.userId = userId;
 
-    let teamId = null;
-    let playerClass = user.class;
-    let teamLevel = user.level;
-    let onlineTeamMembersIds = []; // array of userIds
+    // ── Helper: class string → number ──
+    const classToNum = (cls) => {
+      if (!cls) return 9;
+      if (cls === 'Other' || cls === 'College') return 13;
+      const num = parseInt(cls);
+      return isNaN(num) ? 9 : num;
+    };
 
-    // ── TEAM LOGIC ──
-    
-      const team = await Team.findById(user.currentTeam)
-        .populate('members.user', 'level class username');
+    // ════════════════════════════════════
+    // ── SOLO PATH — handle first, return early ──
+    // ════════════════════════════════════
+    if (!teamId) {
+      // Clear currentTeam just in case (safety)
+      await User.findByIdAndUpdate(userId, { $unset: { currentTeam: '' } });
 
-      if (!team) {
-        return socket.emit('error', { message: 'Team not found' });
-      }
-      const onlineMembers = [];
-        // ← save it here
-    if (user.currentTeam) {
-      // Only leader can trigger queue
-      const member = team.members.find(
-        m => m.user._id.toString() === userId
-      );
-      if (!member || member.role !== 'leader') {
-        return socket.emit('error', { 
-          message: 'Only team leader can start matchmaking' 
-        });
-      }
-
-      // Find all online, not-in-game members
-      for (const m of team.members) {
-        const memberId = m.user._id.toString();
-        const isOnline = await R.isUserOnline(memberId);
-        if (!isOnline) {console.log(`⚠️ Member ${m.user.username} is offline — skipping`);
-        continue;
-      };
-
-        const memberData = await R.getUserOnlineData(memberId);
-        if (memberData?.isInGame === 'true') continue;
-
-        // Check member not already in another queue
-        const memberQueueEntry = await R.getUserQueueEntry(memberId);
-        if (memberQueueEntry) continue; // skip already queued members
-
-        onlineMembers.push({
-          userId: memberId,
-          username: m.user.username,
-          level: m.user.level,
-          class: m.user.class,
-        });
-      }
-
-      if (onlineMembers.length === 0) {
-        return socket.emit('error', { message: 'No team members available' });
-      }
-
-      // Calculate team averages for fair matchmaking
-      const totalLevel = onlineMembers.reduce((sum, m) => sum + m.level, 0);
-      teamLevel = Math.round(totalLevel / onlineMembers.length);
-
-      teamId = team._id.toString();
-      onlineTeamMembersIds = onlineMembers.map(m => m.userId);
-
-      // ── KEY FIX: Add EACH member to queue individually ──
-      for (const m of onlineMembers) {
-        // Check this specific member not already queued
-        const alreadyQueued = await R.getUserQueueEntry(m.userId);
-        if (alreadyQueued) continue;
-
-        await R.addToQueue(m.userId, {
-          username: m.username,
-          level: teamLevel,        // use team average level
-          playerClass: m.class,
-          topic,
-          questionCount: parseInt(questionCount),
-          playerCount,
-          opponentType,
-          gameMode,
-          stance: stance || null,
-          teamId,                  // same teamId links them together
-          onlineTeamMembers: onlineTeamMembersIds.join(','),
-        });
-
-        // Each member joins the socket queue room
-        // So all of them get match:found event
-        const memberSocketData = await R.getUserOnlineData(m.userId);
-        if (memberSocketData?.socketId) {
-          const memberSocket = io.sockets.sockets.get(memberSocketData.socketId);
-          if (memberSocket) {
-            memberSocket.join(`queue:${topic}:${questionCount}:${gameMode}`);
-            memberSocket.emit('match:queued', { 
-          message: `Your team is searching for opponents!` 
-        });
-          }
-        }
-      }
-
-    } else {
-      // ── SOLO LOGIC — just add the one user ──
       await R.addToQueue(userId, {
         username: user.username,
         level: user.level,
-        playerClass: user.class,
+        playerClass: user.class || 'Other',
         topic,
         questionCount: parseInt(questionCount),
         playerCount,
         opponentType,
         gameMode,
         stance: stance || null,
-        teamId: '',
+        teamId: null,
         onlineTeamMembers: '',
       });
 
       socket.join(`queue:${topic}:${questionCount}:${gameMode}`);
+
+      socket.emit('match:queued', {
+        message: 'Searching for opponent...',
+        queueData: { topic, questionCount, playerCount, gameMode, opponentType, stance: stance || null },
+        myTeam: {
+          name: user.username,
+          members: [{ username: user.username, level: user.level, avatar: '👤' }]
+        }
+      });
+
+      console.log(`🎯 Solo queue: ${user.username}`);
+      await tryMatch(io, { topic, questionCount, teamId, gameMode });
+      return; // ← exit here, never reaches team logic
     }
 
-    socket.emit('match:queued', { message: 'Searching for opponent...',
-        queueData: {
-           topic,
-         questionCount,
-         playerCount,
-         gameMode,
-         opponentType,
-         stance: stance || null,
-         },
-         myTeam: {
-           name: team.name,
-           members: onlineMembers.map(m => ({
-            username: m.username,
-            level: m.level,
-            avatar: '👤'
-           }))
-         }
-     });
-    console.log(`🚪 User joining queue: ${userId}`);
-    // Try to match after everyone is queued
-    //await tryMatch(io, { topic, questionCount, gameMode });
+    // ════════════════════════════════════
+    // ── TEAM PATH ──
+    // ════════════════════════════════════
+    const team = await Team.findById(teamId)
+      .populate('members.user', 'level class username');
+
+    if (!team) {
+      // currentTeam set but team deleted — clean up and treat as solo
+      await User.findByIdAndUpdate(userId, { $unset: { currentTeam: '' } });
+      return socket.emit('error', { message: 'Your team no longer exists. Please try again.' });
+    }
+
+    // Only leader can start queue
+    const leaderMember = team.members.find(
+      m => m.user._id.toString() === userId
+    );
+    if (!leaderMember || leaderMember.role !== 'leader') {
+      return socket.emit('error', { message: 'Only team leader can start matchmaking' });
+    }
+
+    // ── Find online, available members ──
+    const onlineMembers = [];
+
+    for (const m of team.members) {
+      const memberId = m.user._id.toString();
+
+      const isOnline = await R.isUserOnline(memberId);
+      if (!isOnline) {
+        console.log(`⚠️ ${m.user.username} is offline — skipping`);
+        continue;
+      }
+
+      const memberData = await R.getUserOnlineData(memberId);
+      if (memberData?.isInGame === 'true') {
+        console.log(`⚠️ ${m.user.username} is in a game — skipping`);
+        continue;
+      }
+
+      const alreadyQueued = await R.getUserQueueEntry(memberId);
+      if (alreadyQueued) {
+        console.log(`⚠️ ${m.user.username} already in queue — skipping`);
+        continue;
+      }
+
+      onlineMembers.push({
+        userId: memberId,
+        username: m.user.username,
+        level: m.user.level,
+        class: m.user.class,
+      });
+    }
+
+    if (onlineMembers.length === 0) {
+      return socket.emit('error', { message: 'No team members are available' });
+    }
+
+    // ── Calculate team averages ──
+    const teamLevel = Math.round(
+      onlineMembers.reduce((sum, m) => sum + (m.level || 1), 0) / onlineMembers.length
+    );
+
+    const avgClassNum = Math.round(
+      onlineMembers.reduce((sum, m) => sum + classToNum(m.class), 0) / onlineMembers.length
+    );
+    const teamClass = avgClassNum >= 13 ? 'College' : String(avgClassNum);
+
+    
+    const teamName = team.name;
+    const onlineTeamMembersStr = onlineMembers.map(m => m.userId).join(',');
+
+    // ── myTeam object built ONCE, sent to everyone ──
+    const myTeamData = {
+      name: teamName,
+      members: onlineMembers.map(m => ({
+        username: m.username,
+        level: m.level,
+        avatar: '👤'
+      }))
+    };
+
+    const queueData = {
+      topic,
+      questionCount: parseInt(questionCount),
+      playerCount,
+      gameMode,
+      opponentType,
+      stance: stance || null,
+    };
+
+    // ── Add each member to queue + notify ──
+    for (const m of onlineMembers) {
+      await R.addToQueue(m.userId, {
+        username: m.username,
+        level: teamLevel,          // team avg level
+        playerClass: teamClass,    // team avg class
+        topic,
+        questionCount: parseInt(questionCount),
+        playerCount,
+        opponentType,
+        gameMode,
+        stance: stance || null,
+        teamId,
+        onlineTeamMembers: onlineTeamMembersStr,
+      });
+
+      const memberSocketData = await R.getUserOnlineData(m.userId);
+      if (!memberSocketData?.socketId) continue;
+
+      const memberSocket = io.sockets.sockets.get(memberSocketData.socketId);
+      if (!memberSocket) continue;
+
+      memberSocket.join(`queue:${topic}:${questionCount}:${gameMode}`);
+
+      // Every member gets full team data ✅
+      memberSocket.emit('match:queued', {
+        message: 'Your team is searching for opponents!',
+        queueData,
+        myTeam: myTeamData,
+      });
+    }
+
+    console.log(`👥 Team queue: ${teamName} — ${onlineMembers.length} members`);
+    await tryMatch(io, { topic, questionCount, teamId, gameMode });
 
   } catch (err) {
     console.error('Join queue error:', err);
     socket.emit('error', { message: 'Failed to join queue' });
   }
-});  
+});
 socket.on('queue:leave', async (data) => {
   try {
-    if (!data) {
-      return socket.emit('error', { message: 'No data received' });
-    }
-
-    const { userId, topic, questionCount, gameMode } = data;
-
-    if (!userId) {
+    if (!data || !data.userId) {
       return socket.emit('error', { message: 'userId required' });
     }
 
-    console.log(`🚪 User leaving queue: ${userId}`);
-
+    const { userId, topic, questionCount, gameMode } = data;
     const queueEntry = await R.getUserQueueEntry(userId);
+
     if (!queueEntry) {
       return socket.emit('queue:left', { message: 'Not in queue' });
     }
 
-    if (queueEntry.teamId) {
-      const members = queueEntry.onlineTeamMembers
-        ? queueEntry.onlineTeamMembers.split(',')
-        : [];
-      for (const memberId of members) {
-        await R.removeFromQueue(memberId, topic, questionCount, gameMode);
-        const memberData = await R.getUserOnlineData(memberId);
-        if (memberData?.socketId) {
-          const memberSocket = io.sockets.sockets.get(memberData.socketId);
-          if (memberSocket) {
-            memberSocket.leave(`queue:${topic}:${questionCount}:${gameMode}`);
-          }
-        }
+    if (queueEntry.teamId && queueEntry.teamId !== '') {
+      // ── TEAM QUEUE: verify this user is the leader ──
+      const team = await Team.findById(queueEntry.teamId);
+      if (!team) {
+        return socket.emit('error', { message: 'Team not found' });
       }
+
+      const member = team.members.find(m => m.user.toString() === userId);
+      if (!member || member.role !== 'leader') {
+        // Non-leader tried to leave — block it
+        return socket.emit('error', { 
+          message: 'Only the team leader can leave the queue' 
+        });
+      }
+
+      // Leader leaving — remove ALL members
+      const memberIds = queueEntry.onlineTeamMembers
+        ? queueEntry.onlineTeamMembers.split(',')
+        : [userId];
+
+      for (const memberId of memberIds) {
+        await R.removeFromQueue(memberId, topic, questionCount, gameMode);
+
+        const memberData = await R.getUserOnlineData(memberId);
+        if (!memberData?.socketId) continue;
+
+        const memberSocket = io.sockets.sockets.get(memberData.socketId);
+        if (!memberSocket) continue;
+
+        memberSocket.leave(`queue:${topic}:${questionCount}:${gameMode}`);
+
+        // Redirect ALL members back to /game
+        memberSocket.emit('queue:left', { 
+          message: 'Leader left the queue',
+          redirect: '/game'   // ← frontend uses this
+        });
+      }
+
     } else {
+      // ── SOLO QUEUE ──
       await R.removeFromQueue(userId, topic, questionCount, gameMode);
       socket.leave(`queue:${topic}:${questionCount}:${gameMode}`);
+      socket.emit('queue:left', { 
+        message: 'Left queue successfully',
+        redirect: '/game'
+      });
     }
 
-    socket.emit('queue:left', { message: 'Left queue successfully' });
     console.log(`✅ User ${userId} left queue`);
 
   } catch (err) {
-    console.error('Leave queue error:', err);
+    console.error('Queue leave error:', err);
     socket.emit('error', { message: 'Failed to leave queue' });
   }
 });
@@ -404,17 +456,126 @@ socket.on('chat:editMessage', async ({ teamId, messageId, content }) => {
   }
 });
 //-------------------------------------------------------------------------------------------------------------------------------
-        socket.on('game:join', async ({ gameId, userId }) => {
-            socket.join(`game:${gameId}`);
-            await R.registerPlayerSocket(gameId, userId, socket.id);
-            await R.setUserInGame(userId, gameId);
+  socket.on('game:join', async ({ gameId, userId }) => {
+  socket.join(`game:${gameId}`);
+  await R.registerPlayerSocket(gameId, userId, socket.id);
+  await R.setUserInGame(userId, gameId);
 
-            const activePlayers = await R.getActivePlayers(gameId);
-            const session = await R.getGameSession(gameId);
+  const session = await R.getGameSession(gameId);
+  const activePlayers = await R.getActivePlayers(gameId);
+  const teamAIds = session.teamAMembers.split(',').filter(Boolean);
+  const teamBIds = session.teamBMembers.split(',').filter(Boolean);
+  const totalExpected = teamAIds.length + teamBIds.length;
 
-            io.to(`game:${gameId}`).emit('game:playerJoined', { userId, activePlayers, session });
-        });
+  io.to(`game:${gameId}`).emit('game:playerJoined', { 
+    userId, 
+    activePlayers, 
+    session 
+  });
 
+  // All players joined → start the game
+  if (activePlayers.length >= totalExpected) {
+    if (session.gameMode === 'discussion') {
+      await startDiscussionGame(io, gameId, session);
+    } else {
+      await startGreetPhase(io, gameId, session);
+    }
+  }
+ });
+  socket.on('game:chat:send', ({ gameId, userId, username, message }) => {
+  io.to(`game:${gameId}`).emit('game:chat:message', {
+    userId, username, message, timestamp: Date.now()
+  });
+});
+
+ socket.on('game:voteNextQuestion', async ({ gameId, userId }) => {
+  try {
+    const session = await R.getGameSession(gameId);
+    if (session.gameMode !== 'discussion') return;
+    if (session.status !== 'discussion') return;
+
+    // Track who voted
+    await R.addNextQuestionVote(gameId, userId);
+    const votes = await R.getNextQuestionVotes(gameId);
+
+    const activePlayers = await R.getActivePlayers(gameId);
+    
+    // Notify everyone of vote progress
+    io.to(`game:${gameId}`).emit('game:nextQuestionVote', {
+      votes: votes.length,
+      required: activePlayers.length,
+      votedUserIds: votes,
+    });
+
+    // ALL players voted → move to next question
+    if (votes.length >= activePlayers.length) {
+      const currentQ = parseInt(session.currentQuestionNumber || 1);
+      const nextQ = currentQ + 1;
+
+      // Clear votes
+      await R.clearNextQuestionVotes(gameId);
+
+      // Check if game is over
+      if (nextQ > parseInt(session.totalQuestions)) {
+        await endDiscussionGame(io, gameId);
+        return;
+      }
+
+      // Get pre-fetched next question
+      const question = await R.getDiscussionQuestion(gameId, nextQ);
+      await R.setCurrentQuestionNumber(gameId, nextQ);
+
+      io.to(`game:${gameId}`).emit('game:discussionQuestion', {
+        question,
+        questionNumber: nextQ,
+        totalQuestions: parseInt(session.totalQuestions),
+      });
+
+      // Pre-fetch the question after next
+     aiHelpers.generateDiscussionQuestion(session.topic, nextQ + 1)
+  .then(q => R.setDiscussionQuestion(gameId, nextQ + 1, q))
+  .catch(err => console.error(`Pre-fetch Q${nextQ + 1} error:`, err.message));
+     
+    }
+
+  } catch (err) {
+    console.error('voteNextQuestion error:', err);
+    socket.emit('error', { message: 'Failed to process vote' });
+  }
+ });
+ socket.on('game:leave', async ({ gameId, userId }) => {
+  try {
+    const session = await R.getGameSession(gameId);
+    
+    // Remove from active players
+    await R.removeActivePlayer(gameId, userId);
+    await R.setUserOffGame(userId);
+    socket.leave(`game:${gameId}`);
+
+    const remainingPlayers = await R.getActivePlayers(gameId);
+
+    if (session.gameMode === 'discussion') {
+      // Notify others
+      io.to(`game:${gameId}`).emit('game:playerLeft', { 
+        userId,
+        remainingPlayers 
+      });
+
+      // Last person left → end game
+      if (remainingPlayers.length === 0) {
+        await R.deleteGameSession(gameId);
+        console.log(`🗑️ Discussion game ${gameId} ended — all players left`);
+      }
+      // Note: game continues as long as anyone is still in ✅
+      
+    } else {
+      await handlePlayerLeave(io, socket, gameId, userId);
+    }
+
+  } catch (err) {
+    console.error('game:leave error:', err);
+  }
+ });
         socket.on('game:askQuestion', async ({ gameId, userId, question, voiceUrl }) => {
             try {
                 const session = await R.getGameSession(gameId);
@@ -575,16 +736,6 @@ socket.on('chat:editMessage', async ({ teamId, messageId, content }) => {
             io.to(`game:${gameId}`).emit('game:debatePointAdded', { userId, point, team: session.currentTeam });
             await proceedToNextTurn(io, gameId);
         });
-
-        socket.on('game:discussionConsensus', async ({ gameId }) => {
-            await generateDiscussionQuestion(gameId, (await R.getGameSession(gameId)).topic, (await R.getGameSession(gameId)).questionsAsked || 0);
-            io.to(`game:${gameId}`).emit('game:discussionQuestionGenerated', { question: await R.getDiscussionQuestion(gameId) });
-            await proceedToNextTurn(io, gameId);
-        });
-
-        socket.on('game:leave', async ({ gameId, userId }) => {
-            await handlePlayerLeave(io, socket, gameId, userId);
-        });
         socket.on('disconnect', async () => {
              console.log(`❌ Socket disconnected: ${socket.id}`);
        const userId = socket.userId;
@@ -618,88 +769,136 @@ socket.on('chat:editMessage', async ({ teamId, messageId, content }) => {
        }
        
        await R.setUserOffline(userId);
-   console.log(`👤 ${userId} marked offline`);
+      console.log(`👤 ${userId} marked offline`);
  });
+ // Add inside io.on('connection', (socket) => { ... })
+socket.on('webrtc:offer', ({ offer, targetUserId, fromUserId, gameId }) => {
+  io.to(`user:${targetUserId}`).emit('webrtc:offer', { offer, fromUserId });
+});
+
+socket.on('webrtc:answer', ({ answer, targetUserId, fromUserId }) => {
+  io.to(`user:${targetUserId}`).emit('webrtc:answer', { answer, fromUserId });
+});
+
+socket.on('webrtc:ice', ({ candidate, targetUserId, fromUserId }) => {
+  io.to(`user:${targetUserId}`).emit('webrtc:ice', { candidate, fromUserId });
+});
 });
 };
 
 // ═══════════════════════════════════════════════════════════════
 // NEW TRY MATCH WITH TEMP TEAM FORMATION
-// ═══════════════════════════════════════════════════════════════
-
+// ══════════════════════════════════════════════════
 async function tryMatch(io, { topic, questionCount, gameMode }) {
-    try {
-        console.log(`🔍 Trying to match for ${topic}, ${questionCount} questions, ${gameMode} mode`);
-        
-        const allEntries = await R.getQueueEntries(topic, questionCount, gameMode);
-        
-        if (allEntries.length < 2) {
-            console.log('Not enough players in queue');
-            return;
-        }
+  try {
+    console.log(`🔍 Trying to match for ${topic}, ${questionCount} questions, ${gameMode} mode`);
 
-        console.log(`Found ${allEntries.length} entries in queue`);
+    const allEntries = await R.getQueueEntries(topic, questionCount, gameMode);
 
-        // Helper: Check level/class match
-        const canMatchLevelClass = (p1, p2) => {
-            const levelDiff = Math.abs(parseInt(p1.level) - parseInt(p2.level));
-            const classDiff = Math.abs(parseInt(p1.class) - parseInt(p2.class));
-            return levelDiff <= 5 && classDiff <= 2;
-        };
-
-        // Helper: Get online count
-        const getOnlineCount = (entry) => {
-            if (entry.onlineTeamMembers) {
-                return entry.onlineTeamMembers.split(',').filter(Boolean).length;
-            }
-            return 1;
-        };
-
-        // Convert opponentType to number
-        const opponentTypeToCount = { 
-            'solo': 1, 'duo': 2, 'trio': 3, 'squad': 4 
-        };
-
-        // ═══════════════════════════════════════════════
-        // SIMPLE DIRECT MATCHING (NO TEMP TEAM FORMATION YET)
-        // ═══════════════════════════════════════════════
-        
-        for (let i = 0; i < allEntries.length - 1; i++) {
-            for (let j = i + 1; j < allEntries.length; j++) {
-                const e1 = allEntries[i];
-                const e2 = allEntries[j];
-
-                // Must match level/class
-                if (!canMatchLevelClass(e1, e2)) continue;
-
-                // For debate: opposite stances
-                if (gameMode === 'debate' && e1.stance === e2.stance) continue;
-
-                // Get counts
-                const e1Has = getOnlineCount(e1);
-                const e2Has = getOnlineCount(e2);
-                
-                const e1WantsFace = opponentTypeToCount[e1.opponentType];
-                const e2WantsFace = opponentTypeToCount[e2.opponentType];
-
-                // 🔥 MATCHING LOGIC:
-                // e1 HAS e1Has players, WANTS TO FACE e1WantsFace
-                // e2 HAS e2Has players, WANTS TO FACE e2WantsFace
-                // MATCH if: e1Has === e2WantsFace AND e2Has === e1WantsFace
-                
-                if (e1Has === e2WantsFace && e2Has === e1WantsFace) {
-                    console.log(`✅ MATCH FOUND: ${e1.username} (${e1Has}) vs ${e2.username} (${e2Has})`);
-                    await createMatch(io, e1, e2, gameMode);
-                    return;
-                }
-            }
-        }
-
-        console.log('No matches found in this iteration');
-
-    } catch (err) {
-        console.error('❌ tryMatch error:', err);
+    if (allEntries.length < 2) {
+      console.log('Not enough players in queue');
+      return;
     }
+
+    console.log(`Found ${allEntries.length} entries in queue`);
+
+    // ── Helper: level and class compatibility ──
+    const canMatch = (p1, p2) => {
+      const levelDiff = Math.abs(parseInt(p1.level || 1) - parseInt(p2.level || 1));
+      
+      const classToNum = (cls) => {
+        if (!cls) return 9;
+        if (cls === 'Other' || cls === 'College') return 13;
+        const num = parseInt(cls);
+        return isNaN(num) ? 9 : num;
+      };
+
+      const classDiff = Math.abs(classToNum(p1.playerClass) - classToNum(p2.playerClass));
+      
+      const compatible = levelDiff <= 5 && classDiff <= 2;
+      if (!compatible) {
+        console.log(`❌ Level/class mismatch: ${p1.username}(${p1.level}) vs ${p2.username}(${p2.level})`);
+      }
+      return compatible; // ← actually returns true/false ✅
+    };
+
+    // ── Helper: how many players does this entry represent ──
+    const getPlayerCount = (entry) => {
+      // Solo player — no team
+      if (!entry.teamId || entry.teamId === '') return 1;
+      
+      // Team player — count from onlineTeamMembers
+      if (entry.onlineTeamMembers) {
+        const members = entry.onlineTeamMembers.split(',').filter(Boolean);
+        return members.length;
+      }
+      return 1;
+    };
+
+    // ── Convert opponentType to expected count ──
+    const opponentTypeToCount = {
+      'solo': 1, 'duo': 2, 'trio': 3, 'squad': 4
+    };
+
+    // ── Deduplicate entries by teamId ──
+    // Multiple team members are in queue individually but represent ONE entry
+    const seenTeams = new Set();
+    const uniqueEntries = [];
+
+    for (const queueEntry of allEntries) {
+      if (queueEntry.teamId && queueEntry.teamId !== '') {
+        if (seenTeams.has(queueEntry.teamId)) continue; // skip duplicate team members
+        seenTeams.add(queueEntry.teamId);
+      }
+      uniqueEntries.push(queueEntry);
+    }
+
+    console.log(`Unique entries after dedup: ${uniqueEntries.length}`);
+
+    if (uniqueEntries.length < 2) {
+      console.log('Not enough unique entries after dedup');
+      return;
+    }
+
+    // ── Match pairs ──
+    for (let i = 0; i < uniqueEntries.length - 1; i++) {
+      for (let j = i + 1; j < uniqueEntries.length; j++) {
+        const e1 = uniqueEntries[i];
+        const e2 = uniqueEntries[j];
+
+        // Same team? skip
+        if (e1.teamId && e1.teamId === e2.teamId) continue;
+
+        // Level/class check
+        if (!canMatch(e1, e2)) continue;
+
+        // Debate requires opposite stances
+        if (gameMode === 'debate' && e1.stance === e2.stance) continue;
+
+        // How many players each side has
+        const e1Count = getPlayerCount(e1);
+        const e2Count = getPlayerCount(e2);
+
+        // What each side expects to face
+        const e1Wants = opponentTypeToCount[e1.opponentType];
+        const e2Wants = opponentTypeToCount[e2.opponentType];
+
+        console.log(`Checking: ${e1.username}(has ${e1Count}, wants ${e1Wants}) vs ${e2.username}(has ${e2Count}, wants ${e2Wants})`);
+     const e1Satisfied = !e1Wants || e2Count === e1Wants;
+     const e2Satisfied = !e2Wants || e1Count === e2Wants;
+     if (e1Satisfied && e2Satisfied) {
+     console.log(`✅ MATCH: ${e1.username}(has ${e1Count}, wants ${e1.opponentType}) vs ${e2.username}(has ${e2Count}, wants ${e2.opponentType})`);
+      await createMatch(io, e1, e2, gameMode);
+     return;
+    }
+    }
+    }
+
+    console.log('No compatible matches found in this iteration');
+
+  } catch (err) {
+    console.error('❌ tryMatch error:', err);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -714,30 +913,48 @@ async function createMatch(io, entry1, entry2, gameMode) {
     console.log('Entry2:', entry2);
     
     // Get all user IDs
-    const getMembers = (entry) => {
-        if (entry.onlineTeamMembers) {
-            return entry.onlineTeamMembers.split(',').filter(Boolean);
-        }
-        return [entry.userId];
-    };
-
-    const teamAMembers = getMembers(entry1);
-    const teamBMembers = getMembers(entry2);
+    const getMembers = async (entry) => {
+  if (!entry.teamId || entry.teamId === '') {
+    return [{
+      userId: entry.userId,
+      username: entry.username,
+      level: entry.level,
+      avatar: '👤'
+    }];
+  }
+  const memberIds = entry.onlineTeamMembers.split(',').filter(Boolean);
+  return await Promise.all(
+    memberIds.map(async (userId) => {
+      const userData = await R.getUserOnlineData(userId);
+      return {
+        userId,
+        username: userData?.username || 'Unknown',
+        level: userData?.level || 1,
+        avatar: '👤'
+      };
+    })
+  );
+ }    
+    const teamAMembers = await getMembers(entry1);
+    const teamBMembers = await getMembers(entry2);
     
     console.log('TeamA members:', teamAMembers);
     console.log('TeamB members:', teamBMembers);
     
+    const teamAUserIds = teamAMembers.map(m => m.userId);
+    const teamBUserIds = teamBMembers.map(m => m.userId);
     // Create game session
     const firstTeam = Math.random() < 0.5 ? 'teamA' : 'teamB';
-    const teamATurnOrder = shuffle(teamAMembers);
-    const teamBTurnOrder = shuffle(teamBMembers);
+    const teamATurnOrder = shuffle(teamAUserIds);
+    const teamBTurnOrder = shuffle(teamBUserIds);
 
-    await R.createGameSession(gameId, {
+    await R.createGameSession({
+        gameId,
         topic: entry1.topic,
         totalQuestions: entry1.questionCount,
         gameMode,
-        teamAMembers: teamAMembers.join(','),
-        teamBMembers: teamBMembers.join(','),
+        teamAMembers: teamAUserIds,
+        teamBMembers: teamBUserIds,
         currentTeam: firstTeam,
         questionsAsked: 0,
         status: 'greet',
@@ -745,45 +962,93 @@ async function createMatch(io, entry1, entry2, gameMode) {
         teamBScore: 0,
         teamAStance: entry1.stance || null,
         teamBStance: entry2.stance || null,
-    });
+      });
 
-    await R.setTeamTurnOrder(gameId, 'teamA', teamATurnOrder);
-    await R.setTeamTurnOrder(gameId, 'teamB', teamBTurnOrder);
-    await R.setCurrentAsker(gameId, firstTeam === 'teamA' ? teamATurnOrder[0] : teamBTurnOrder[0]);
+    await R.setTurnOrder(gameId, 'teamA', teamATurnOrder);
+    await R.setTurnOrder(gameId, 'teamB', teamBTurnOrder);
+    await R.getCurrentAsker(gameId, firstTeam === 'teamA' ? teamATurnOrder[0] : teamBTurnOrder[0]);
 
     // Emit to all players
-    const matchData = {
-        gameId,
-        gameMode,
-        topic: entry1.topic,
-        totalQuestions: entry1.questionCount,
-        teamAMembers,
-        teamBMembers,
-        firstTeam,
-        teamAStance: entry1.stance || null,
-        teamBStance: entry2.stance || null,
-    };
-
-    [...teamAMembers, ...teamBMembers].forEach(userId => {
-        io.to(`user:${userId}`).emit('match:found', matchData);
-    });
-
+    [...teamAUserIds, ...teamBUserIds].forEach(userId => {
+  const isTeamA = teamAUserIds.includes(userId);
+  io.to(`user:${userId}`).emit('match:found', {
+    gameId,
+    gameMode,
+    topic: entry1.topic,
+    totalQuestions: entry1.questionCount,
+    firstTeam,
+    teamAStance: entry1.stance || null,
+    teamBStance: entry2.stance || null,
+    myTeamKey: isTeamA ? 'teamA' : 'teamB',
+    myMembers: isTeamA ? teamAMembers : teamBMembers,       // ← full objects for display
+    opponentMembers: isTeamA ? teamBMembers : teamAMembers, // ← full objects for display
+  });
+ });
     // Remove from queue
-    await R.removeFromQueue(entry1.userId, entry1);
-    await R.removeFromQueue(entry2.userId, entry2);
-
-    // Start greet timer
-    await R.startGreetTimer(gameId);
-    io.to(`game:${gameId}`).emit('game:greetPhase', { duration: 30, gameId, gameMode });
-    
-    console.log('✅ Match created successfully');
+  
+  await R.removeFromQueue(entry1.userId, entry1.topic, entry1.questionCount, entry1.gameMode);
+  await R.removeFromQueue(entry2.userId, entry2.topic, entry2.questionCount, entry2.gameMode);
 }
 
-async function generateDiscussionQuestion(gameId, topic, questionNumber) {
-    const aiQuestion = await aiHelpers.generateDiscussionQuestion(topic, questionNumber);
-    await R.setDiscussionQuestion(gameId, questionNumber, aiQuestion);
-    return aiQuestion;
+    async function startDiscussionGame(io, gameId, session) {
+  // Start greet phase — players can turn on video/mic
+  await R.setGameStatus(gameId, 'greet');
+  io.to(`game:${gameId}`).emit('game:greetPhase', { 
+    duration: 30, 
+    gameId, 
+    gameMode: 'discussion' 
+  });
+  // While players greet — fetch question 1 in background
+  aiHelpers.generateDiscussionQuestion(session.topic, 1)
+    .then(question => R.setDiscussionQuestion(gameId, 1, question))
+    .then(() => console.log(`✅ Q1 pre-fetched for game ${gameId}`))
+    .catch(err => console.error('Pre-fetch Q1 error:', err.message));
+
+  // After 30s greet — reveal question 1
+  setTimeout(async () => {
+    try {
+        const question = await R.getDiscussionQuestion(gameId, 1);
+const finalQuestion = question || `What are your thoughts on ${session.topic}?`;
+await R.setGameStatus(gameId, 'discussion');
+await R.setCurrentQuestionNumber(gameId, 1);
+
+io.to(`game:${gameId}`).emit('game:discussionQuestion', {
+  question: finalQuestion,
+  questionNumber: 1,
+  totalQuestions: parseInt(session.totalQuestions),
+      });
+   aiHelpers.generateDiscussionQuestion(session.topic, 2)
+  .then(q => R.setDiscussionQuestion(gameId, 2, q))
+  .catch(err => console.error('Pre-fetch Q2 error:', err.message));
+
+    } catch (err) {
+      console.error('Discussion start error:', err);
+    }
+  }, 30000);
+ }
+ 
+async function startGreetPhase(io, gameId, session) {
+  await R.setGameStatus(gameId, 'greet');
+  io.to(`game:${gameId}`).emit('game:greetPhase', { 
+    duration: 30, 
+    gameId, 
+    gameMode: session.gameMode 
+  });
+  // Timer expiry is handled by Redis keyspace notification
+  // handleTimerExpiry listens for ':timer:greet' key expiry
+  // which then emits game:started and starts the ask timer
+  await R.startGreetTimer(gameId);
 }
+async function endDiscussionGame(io, gameId) {
+  await R.deleteGameSession(gameId);
+  io.to(`game:${gameId}`).emit('game:ended', {
+    result: 'discussion_complete',
+    message: 'Discussion session ended!'
+  });
+  console.log(`🏁 Discussion game ${gameId} ended`);
+}
+
+
 
 async function proceedToNextTurn(io, gameId) {
     const { questionsAsked, totalQuestions } = await R.advanceTurn(gameId);
@@ -859,15 +1124,22 @@ async function handlePlayerLeave(io, socket, gameId, userId) {
 
 async function handleTimerExpiry(io, expiredKey) {
     try {
-        if (expiredKey.includes(':timer:greet')) {
-            const gameId = expiredKey.split(':')[1];
-            await R.updateGameSession(gameId, { status: 'active' });
-            const nextAsker = await R.getCurrentAsker(gameId);
-            const session = await R.getGameSession(gameId);
-            io.to(`game:${gameId}`).emit('game:started', { message: 'Game begins!', firstAsker: nextAsker, currentTeam: session.currentTeam });
-            await R.startAskTimer(gameId);
-            io.to(`game:${gameId}`).emit('game:askTimer', { askerId: nextAsker, duration: 15 });
-        }
+      if (expiredKey.includes(':timer:greet')) {
+  const gameId = expiredKey.split(':')[1];
+  const session = await R.getGameSession(gameId);
+  if (!session) return;
+
+  // Discussion greet is handled by startDiscussionGame's setTimeout — not here
+  if (session.gameMode === 'discussion') return; // ← add this
+
+  await R.updateGameSession(gameId, { status: 'active' });
+  const nextAsker = await R.getCurrentAsker(gameId);
+  io.to(`game:${gameId}`).emit('game:started', { 
+    message: 'Game begins!', firstAsker: nextAsker, currentTeam: session.currentTeam 
+  });
+  await R.startAskTimer(gameId);
+  io.to(`game:${gameId}`).emit('game:askTimer', { askerId: nextAsker, duration: 15 });
+}
         else if (expiredKey.includes(':timer:ask')) {
             const gameId = expiredKey.split(':')[1];
             io.to(`game:${gameId}`).emit('game:askTimerExpired', { message: 'Question skipped!' });

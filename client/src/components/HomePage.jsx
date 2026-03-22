@@ -5,7 +5,9 @@ import Lenis from '@studio-freight/lenis';
 
 
 export default function HomePage({ user: propUser}) {
+  useEffect(() => {
   console.log('propUser received:', propUser);
+}, [propUser]);
 const [currentUser, setCurrentUser] = useState(propUser ?? null);
   useEffect(() => {
     const lenis = new Lenis({

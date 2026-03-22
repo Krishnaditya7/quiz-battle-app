@@ -10,8 +10,31 @@ export default function WaitingRoom({ socket, user}) {
   const [opponentTeam, setOpponentTeam] = useState(null);
   const [countdown, setCountdown] = useState(null);
   const [queueTime, setQueueTime] = useState(0);
+ useEffect(() => {
+  console.log('myTeam from location.state:', myTeam);
+  console.log('sessionStorage pendingMyTeam:', 
+    JSON.parse(sessionStorage.getItem('pendingMyTeam') || 'null'));
+}, []);
+ useEffect(() => {
+  if (!socket) return;
 
-  useEffect(() => {
+  socket.on('queue:left', (data) => {
+    // Redirect everyone to /game when queue is left
+    navigate(data?.redirect || '/game');
+  });
+
+  socket.on('error', (data) => {
+    alert(data.message);
+  });
+
+
+  return () => {
+    socket.off('queue:left');
+    socket.off('error');
+  };
+ }, [socket]);
+
+ useEffect(() => {
     const timer = setInterval(() => {
       setQueueTime(prev => prev + 1);
     }, 1000);
@@ -23,28 +46,28 @@ export default function WaitingRoom({ socket, user}) {
     const s = seconds % 60;
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
-  useEffect(() => {
-   if (!socket) return;
-    socket.on('match:found', (data) => {
-      setMatchFound(true);
-      setOpponentTeam(data);
-      
-      // 3 second countdown before game starts
-      let count = 3;
-      setCountdown(count);
-      const timer = setInterval(() => {
-        count--;
-        setCountdown(count);
-        if (count === 0) {
-          clearInterval(timer);
-          navigate('/game-room', { state: { gameData: data } });
-        }
-      }, 1000);
-    });
+  // WaitingRoom.jsx — keep this for the visual countdown
+useEffect(() => {
+  if (!socket) return;
 
-    return () => socket.off('match:found');
-  }, [socket,navigate]);
-const handleLeaveQueue = () => {
+  socket.on('match:found', (data) => {
+    setMatchFound(true);                  // ← triggers UI change
+    setOpponentTeam(data);
+    
+    let count = 3;
+    setCountdown(count);
+    const timer = setInterval(() => {
+      count--;
+      setCountdown(count);
+      if (count === 0) {clearInterval(timer);
+     navigate('/game-room', { state: { gameData: data } });
+      }
+    }, 1000);
+  });
+
+  return () => socket.off('match:found');
+}, [socket]);
+ const handleLeaveQueue = () => {
     if (!socket || !user || !queueData) {
       navigate('/game');
       return;
@@ -60,6 +83,9 @@ const handleLeaveQueue = () => {
 
     navigate('/game');
   };
+ const isLeader = myTeam?.members?.length > 0 
+  ? myTeam.members[0].username === user?.username  // leader is always first
+  : true; 
 
   // Generate placeholder avatars for scrolling animation
   const placeholderAvatars = ['🥷', '👑', '🔥', '⚡', '💀', '🎯', '🛡️', '⚔️'];
@@ -83,7 +109,8 @@ const handleLeaveQueue = () => {
             {/* MY TEAM (Right Side) */}
             <div className="space-y-4">
               <h3 className="text-2xl font-black text-center text-purple-300 mb-6">{myTeam?.name ? myTeam.name.toUpperCase() : 'MY TEAM'}</h3>
-              {Array.from({ length: queueData?.playerCount || 1 }).map((_, index) => (
+              {(myTeam?.members || [{ username: user?.username, level: user?.level, avatar: '👤' }])
+               .map((member, index) =>(
                 <div
                   key={index}
                   className={`bg-slate-800/50 border-2 ${
@@ -94,16 +121,16 @@ const handleLeaveQueue = () => {
                   <div className="flex items-center gap-4">
                     {/* Avatar */}
                     <div className="w-16 h-16 rounded-full bg-gradient-to-br from-purple-600 to-pink-600 flex items-center justify-center text-3xl shadow-lg">
-                      {myTeam?.members?.[index]?.avatar || '👤'}
+                      {member.avatar || '👤'}
                     </div>
                     
                     {/* Player Info */}
                     <div className="flex-1">
                       <div className="font-bold text-lg">
-                        {myTeam?.members?.[index]?.username || `Player ${index + 1}`}
+                        {member.username || `Player ${index + 1}`}
                       </div>
                       <div className="text-sm text-slate-400">
-                        Level {myTeam?.members?.[index]?.level || '?'}
+                        Level {member.level || '?'}
                       </div>
                     </div>
 
@@ -177,29 +204,23 @@ const handleLeaveQueue = () => {
                     </div>
                   </div>
                 ))
-              ) : (
+               ) : (
                 // Show matched opponents
-                opponentTeam?.teamBMembers?.map((opponent, index) => (
-                  <div
-                    key={index}
-                    className="bg-slate-800/50 border-2 border-green-500 rounded-2xl p-6 hover:scale-105 transition-all duration-500 animate-slideInLeft"
-                    style={{ animationDelay: `${index * 0.1}s` }}
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className="w-16 h-16 rounded-full bg-gradient-to-br from-orange-600 to-red-600 flex items-center justify-center text-3xl shadow-lg">
-                        {opponent.avatar || '👤'}
-                      </div>
-                      
-                      <div className="flex-1">
-                        <div className="font-bold text-lg">{opponent.username}</div>
-                        <div className="text-sm text-slate-400">Level {opponent.level}</div>
-                      </div>
-
-                      <div className="w-3 h-3 rounded-full bg-green-500 animate-pulse" />
-                    </div>
-                  </div>
-                ))
-              )}
+                 opponentTeam?.opponentMembers || []).map((opponent, index) => (
+                <div key={index} className="bg-slate-800/50 border-2 border-green-500 rounded-2xl p-6">
+                <div className="flex items-center gap-4">
+                <div className="w-16 h-16 rounded-full bg-gradient-to-br from-orange-600 to-red-600 flex items-center justify-center text-3xl">
+                {opponent.avatar || '👤'}
+                </div>
+                <div className="flex-1">
+                <div className="font-bold text-lg">{opponent.username}</div>
+                <div className="text-sm text-slate-400">Level {opponent.level}</div>
+               </div>
+               <div className="w-3 h-3 rounded-full bg-green-500 animate-pulse" />
+               </div>
+               </div>
+               )
+             )}
             </div>
           </div>
         </div>
@@ -208,11 +229,16 @@ const handleLeaveQueue = () => {
         {!matchFound && (
           <div className="text-center mt-12">
             <button
-              onClick={handleLeaveQueue}
-              className="px-12 py-4 bg-red-600 hover:bg-red-500 rounded-2xl font-bold text-lg transition-all hover:scale-105"
-            >
-              LEAVE QUEUE
-            </button>
+          onClick={handleLeaveQueue}
+          disabled={!isLeader}
+           className={`px-6 py-3 rounded-xl font-bold transition-all ${
+        isLeader 
+      ? 'bg-red-600 hover:bg-red-500 cursor-pointer' 
+      : 'bg-slate-700 cursor-not-allowed opacity-50'
+  }`}
+ >
+  {isLeader ? 'Leave Queue' : 'Only leader can leave'}
+ </button>
           </div>
         )}
 

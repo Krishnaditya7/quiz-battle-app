@@ -1,487 +1,943 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import io from 'socket.io-client';
-
-export default function GameRoom() {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const { gameData } = location.state || {};
-  
-  const [socket, setSocket] = useState(null);
-  const [gameState, setGameState] = useState({
-    currentTurn: null,
-    currentQuestion: null,
-    timer: 0,
-    teamAScore: 0,
-    teamBScore: 0,
-    questionsRemaining: gameData?.totalQuestions || 10,
-    playerScores: {},
-  });
-
-  const [myTeam, setMyTeam] = useState(gameData?.teamAMembers || []);
-  const [opponentTeam, setOpponentTeam] = useState(gameData?.teamBMembers || []);
-  
-  const [videoEnabled, setVideoEnabled] = useState(false);
-  const [voiceEnabled, setVoiceEnabled] = useState(false);
-  const [chatOpen, setChatOpen] = useState(false);
-  const [showPlayerStats, setShowPlayerStats] = useState(null);
-  const [generateVotes, setGenerateVotes] = useState(new Set());
-  const [messages, setMessages] = useState([]);
-  const [newMessage, setNewMessage] = useState('');
-
-  const videoRefs = useRef({});
+import axios from 'axios';
+// ── OUTSIDE GameRoom function — at the top of the file ──
+// ── OUTSIDE GameRoom function — at the top of the file ──
+const PlayerTile = React.memo(({ 
+  player, isMe, isMine, 
+  videoEnabled, voiceEnabled,
+  localVideoRef, remoteStreams,
+  speakingRingRefs, playersInGame,
+  onAddFriend, onReport, onShowProfile,
+}) => {
+  const stream = isMe ? null : remoteStreams?.[player.userId];
+  const isOnline = isMe || playersInGame.includes(player.userId);
+  const remoteVideoRef = useRef(null);
 
   useEffect(() => {
-    const newSocket = io('http://localhost:5000', {
-      withCredentials: true
-    });
-
-    // Socket listeners
-    newSocket.on('game:started', (data) => {
-      console.log('Game started!', data);
-    });
-
-    newSocket.on('game:turnChanged', (data) => {
-      setGameState(prev => ({ ...prev, currentTurn: data.userId }));
-    });
-
-    newSocket.on('game:questionAsked', (data) => {
-      setGameState(prev => ({ 
-        ...prev, 
-        currentQuestion: data.question,
-        timer: 10 // Pin timer
-      }));
-    });
-
-    newSocket.on('game:scoreUpdate', (data) => {
-      setGameState(prev => ({
-        ...prev,
-        teamAScore: data.teamAScore,
-        teamBScore: data.teamBScore,
-        playerScores: data.playerScores
-      }));
-    });
-
-    newSocket.on('game:ended', (data) => {
-      navigate('/game-results', { state: { results: data } });
-    });
-
-    setSocket(newSocket);
-
-    return () => newSocket.close();
-  }, [navigate]);
-
-  const handleLeaveGame = () => {
-    if (confirm('Are you sure you want to leave? You\'ll lose the match!')) {
-      socket?.emit('game:leave', { gameId: gameData.gameId });
-      navigate('/dashboard');
+    if (remoteVideoRef.current && stream) {
+      remoteVideoRef.current.srcObject = stream;
     }
-  };
-
-  const handleGenerateQuestion = () => {
-    socket?.emit('game:requestNextQuestion', { 
-      gameId: gameData.gameId,
-      userId: 'currentUserId' // Replace with actual
-    });
-  };
-
-  const handleSendMessage = () => {
-    if (newMessage.trim()) {
-      socket?.emit('game:chat', {
-        gameId: gameData.gameId,
-        message: newMessage
-      });
-      setMessages([...messages, { from: 'You', text: newMessage }]);
-      setNewMessage('');
-    }
-  };
-
-  const isMyTurn = (playerId) => {
-    return gameState.currentTurn === playerId;
-  };
-
-  const isDiscussion = gameData?.gameMode === 'discussion';
+  }, [stream]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-purple-950 to-slate-900 text-white flex flex-col">
-      {/* Main Game Area */}
-      <div className="flex-1 grid grid-cols-[300px_1fr_300px] gap-6 p-6">
-        {/* LEFT: My Team */}
-        <div className="space-y-4">
-          <h3 className="text-xl font-black text-purple-300 text-center mb-4">YOUR TEAM</h3>
-          {myTeam.map((player, index) => (
-            <div
-              key={player._id}
-              className={`relative group ${
-                isMyTurn(player._id) ? 'ring-4 ring-green-500 ring-offset-4 ring-offset-slate-950' : ''
-              }`}
-            >
-              {/* Player Box */}
-              <div className="bg-slate-800/50 border-2 border-purple-500/50 rounded-2xl p-4 hover:border-purple-500 transition-all cursor-pointer"
-                   onClick={() => setShowPlayerStats(player)}>
-                {/* Video/Avatar */}
-                {videoEnabled && player.videoStream ? (
-                  <video
-                    ref={el => videoRefs.current[player._id] = el}
-                    autoPlay
-                    muted={player._id === 'myId'} // Mute self
-                    className="w-full aspect-square rounded-xl object-cover mb-3"
-                  />
-                ) : (
-                  <div className="w-full aspect-square rounded-xl bg-gradient-to-br from-purple-600 to-pink-600 flex items-center justify-center text-5xl mb-3">
-                    {player.avatar || '👤'}
-                  </div>
-                )}
+    <div
+      className="relative group cursor-pointer transition-all duration-300"
+      onClick={() => !isMe && onShowProfile(player)}
+    >
+      {/* Speaking ring — opacity controlled via ref, no React state */}
+      <div
+        ref={el => { if (el && speakingRingRefs?.current) speakingRingRefs.current[player.userId] = el; }}
+        className="absolute inset-0 rounded-2xl ring-2 ring-emerald-400 ring-offset-2 z-10 pointer-events-none transition-opacity duration-100"
+        style={{ opacity: 0 }}
+      />
 
-                {/* Player Info */}
-                <div className="text-center">
-                  <div className="font-bold truncate">{player.username}</div>
-                  <div className="text-sm text-slate-400">Lvl {player.level}</div>
-                  <div className="text-lg font-black text-purple-300 mt-2">
-                    {gameState.playerScores[player._id] || 0} pts
-                  </div>
-                </div>
+      <div className={`relative rounded-2xl overflow-hidden border ${
+        isMine ? 'border-violet-500/30' : 'border-amber-500/20'
+      } bg-slate-900/60 backdrop-blur-sm`}>
 
-                {/* Turn Indicator */}
-                {isMyTurn(player._id) && !isDiscussion && (
-                  <div className="absolute -top-2 -right-2 w-8 h-8 bg-green-500 rounded-full flex items-center justify-center text-sm font-black animate-pulse shadow-lg shadow-green-500/50">
-                    ⚡
-                  </div>
-                )}
-
-                {/* Score +1 Animation */}
-                {/* Add when player scores */}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* CENTER: Game Action Area */}
-        <div className="flex flex-col">
-          {/* Score Circle */}
-          <div className="flex items-center justify-center mb-6">
-            <div className="relative w-32 h-32">
-              {/* Circle with half colors */}
-              <svg className="w-full h-full -rotate-90">
-                <circle
-                  cx="64"
-                  cy="64"
-                  r="56"
-                  fill="none"
-                  stroke="url(#gradient1)"
-                  strokeWidth="16"
-                  strokeDasharray="176 176"
-                />
-                <defs>
-                  <linearGradient id="gradient1" x1="0%" y1="0%" x2="100%" y2="0%">
-                    <stop offset="50%" stopColor="#a855f7" />
-                    <stop offset="50%" stopColor="#f97316" />
-                  </linearGradient>
-                </defs>
-              </svg>
-
-              {/* Scores */}
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="text-center">
-                  <div className="text-sm font-bold text-purple-300">{gameState.teamAScore}</div>
-                  <div className="text-xs text-slate-500">:</div>
-                  <div className="text-sm font-bold text-orange-300">{gameState.teamBScore}</div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Main Action Box */}
-          {!isDiscussion && gameState.currentTurn ? (
-            // Show current player big
-            <div className="flex-1 bg-slate-800/50 border-2 border-purple-500 rounded-3xl p-8 flex flex-col items-center justify-center mb-6">
-              <div className="w-48 h-48 rounded-3xl bg-gradient-to-br from-purple-600 to-pink-600 flex items-center justify-center text-8xl mb-6 shadow-2xl shadow-purple-500/50">
-                {/* Current turn player avatar */}
-                👑
-              </div>
-              <div className="text-3xl font-black mb-2">Player's Turn</div>
-              <div className="text-lg text-slate-400">Asking question...</div>
-              
-              {/* Timer */}
-              {gameState.timer > 0 && (
-                <div className="mt-6 text-6xl font-black text-green-400 animate-pulse">
-                  {gameState.timer}s
-                </div>
-              )}
-            </div>
-          ) : isDiscussion ? (
-            // Discussion: Generate Question Button
-            <div className="flex-1 bg-slate-800/50 border-2 border-blue-500 rounded-3xl p-8 flex flex-col items-center justify-center mb-6">
-              <div className="text-6xl mb-6">💬</div>
-              <h3 className="text-3xl font-black mb-4">Discussion Mode</h3>
-              <p className="text-slate-400 mb-8 text-center max-w-md">
-                Everyone must click to generate the next question
-              </p>
-              
-              <button
-                onClick={handleGenerateQuestion}
-                className="px-12 py-6 bg-gradient-to-r from-blue-600 to-cyan-600 rounded-2xl font-bold text-xl hover:shadow-2xl hover:shadow-blue-500/50 transition-all hover:scale-105"
-              >
-                GENERATE NEW QUESTION
-              </button>
-
-              <div className="mt-6 text-sm text-slate-400">
-                Votes: {generateVotes.size} / {myTeam.length + opponentTeam.length}
-              </div>
-            </div>
+        <div className="aspect-square relative">
+          {isMe && videoEnabled ? (
+            <video
+              ref={localVideoRef}
+              autoPlay muted playsInline
+              className="w-full h-full object-cover"
+              style={{ transform: 'scaleX(-1)' }}
+            />
+          ) : stream ? (
+            <video
+              ref={remoteVideoRef}
+              autoPlay playsInline
+              className="w-full h-full object-cover"
+            />
           ) : (
-            // Waiting for game to start
-            <div className="flex-1 bg-slate-800/50 border-2 border-purple-500/50 rounded-3xl p-8 flex items-center justify-center mb-6">
-              <div className="text-center">
-                <div className="text-6xl mb-6 animate-bounce">⏳</div>
-                <div className="text-2xl font-black text-slate-300">Game Starting Soon...</div>
-              </div>
+            <div className={`w-full h-full flex items-center justify-center text-4xl ${
+              isMine
+                ? 'bg-gradient-to-br from-violet-800/50 to-purple-900/50'
+                : 'bg-gradient-to-br from-amber-900/40 to-orange-900/40'
+            }`}>
+              {player.avatar || '👤'}
             </div>
           )}
 
-          {/* Current Question Display */}
-          {gameState.currentQuestion && (
-            <div className="bg-gradient-to-br from-purple-600/20 to-pink-600/20 border-2 border-purple-500/50 rounded-2xl p-6 mb-6 animate-fadeIn">
-              <div className="text-sm text-purple-300 font-bold mb-2">CURRENT QUESTION:</div>
-              <div className="text-xl font-bold">{gameState.currentQuestion}</div>
+          {!isOnline && !isMe && (
+            <div className="absolute inset-0 bg-slate-950/70 flex items-center justify-center">
+              <span className="text-xs text-slate-400 font-mono">OFFLINE</span>
             </div>
           )}
-        </div>
 
-        {/* RIGHT: Opponent Team */}
-        <div className="space-y-4">
-          <h3 className="text-xl font-black text-orange-300 text-center mb-4">OPPONENTS</h3>
-          {opponentTeam.map((player, index) => (
-            <div
-              key={player._id}
-              className={`relative group ${
-                isMyTurn(player._id) ? 'ring-4 ring-yellow-500 ring-offset-4 ring-offset-slate-950' : ''
-              }`}
-            >
-              {/* Player Box */}
-              <div className="bg-slate-800/50 border-2 border-orange-500/50 rounded-2xl p-4 hover:border-orange-500 transition-all cursor-pointer"
-                   onClick={() => setShowPlayerStats(player)}>
-                {/* Video/Avatar */}
-                {videoEnabled && player.videoStream ? (
-                  <video
-                    ref={el => videoRefs.current[player._id] = el}
-                    autoPlay
-                    className="w-full aspect-square rounded-xl object-cover mb-3"
-                  />
-                ) : (
-                  <div className="w-full aspect-square rounded-xl bg-gradient-to-br from-orange-600 to-red-600 flex items-center justify-center text-5xl mb-3">
-                    {player.avatar || '👤'}
-                  </div>
-                )}
-
-                {/* Player Info */}
-                <div className="text-center">
-                  <div className="font-bold truncate">{player.username}</div>
-                  <div className="text-sm text-slate-400">Lvl {player.level}</div>
-                  <div className="text-lg font-black text-orange-300 mt-2">
-                    {gameState.playerScores[player._id] || 0} pts
-                  </div>
-                </div>
-
-                {/* Turn Indicator */}
-                {isMyTurn(player._id) && !isDiscussion && (
-                  <div className="absolute -top-2 -right-2 w-8 h-8 bg-yellow-500 rounded-full flex items-center justify-center text-sm font-black animate-pulse shadow-lg shadow-yellow-500/50">
-                    ⚡
-                  </div>
-                )}
-
-                {/* Action Icons (Report + Add Friend) */}
-                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2">
-                  <button className="w-8 h-8 bg-red-600 hover:bg-red-500 rounded-full flex items-center justify-center text-sm transition-all">
-                    🚫
-                  </button>
-                  <button className="w-8 h-8 bg-blue-600 hover:bg-blue-500 rounded-full flex items-center justify-center text-sm transition-all">
-                    ➕
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Footer Controls */}
-      <div className="bg-slate-900/80 backdrop-blur-xl border-t border-purple-500/20 p-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          {/* Left: Media Controls */}
-          <div className="flex gap-4">
-            <button
-              onClick={() => setVideoEnabled(!videoEnabled)}
-              className={`w-14 h-14 rounded-full flex items-center justify-center text-2xl transition-all ${
-                videoEnabled 
-                  ? 'bg-green-600 hover:bg-green-500' 
-                  : 'bg-slate-700 hover:bg-slate-600'
-              }`}
-            >
-              📹
-            </button>
-
-            <button
-              onClick={() => setVoiceEnabled(!voiceEnabled)}
-              className={`w-14 h-14 rounded-full flex items-center justify-center text-2xl transition-all ${
-                voiceEnabled 
-                  ? 'bg-green-600 hover:bg-green-500' 
-                  : 'bg-slate-700 hover:bg-slate-600'
-              }`}
-            >
-              🎤
-            </button>
-
-            <button
-              onClick={() => setChatOpen(!chatOpen)}
-              className="w-14 h-14 bg-slate-700 hover:bg-slate-600 rounded-full flex items-center justify-center text-2xl transition-all relative"
-            >
-              💬
-              {messages.length > 0 && (
-                <div className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full text-xs flex items-center justify-center font-bold">
-                  {messages.length}
-                </div>
-              )}
-            </button>
-          </div>
-
-          {/* Center: Game Info */}
-          <div className="flex gap-8 items-center">
-            <div className="bg-slate-800/50 px-6 py-3 rounded-xl border border-purple-500/30">
-              <div className="text-sm text-slate-400">Questions Left</div>
-              <div className="text-2xl font-black text-purple-300">{gameState.questionsRemaining}</div>
-            </div>
-
-            <div className="bg-slate-800/50 px-6 py-3 rounded-xl border border-purple-500/30">
-              <div className="text-sm text-slate-400">Your Score</div>
-              <div className="text-2xl font-black text-green-400">
-                {gameState.playerScores['myId'] || 0}
-              </div>
-            </div>
-          </div>
-
-          {/* Right: Leave Button */}
-          <button
-            onClick={handleLeaveGame}
-            className="px-8 py-3 bg-red-600 hover:bg-red-500 rounded-xl font-bold transition-all hover:scale-105"
+          {/* Waveform — also ref controlled */}
+          <div
+            ref={el => { if (el && speakingRingRefs?.current) speakingRingRefs.current[`wave_${player.userId}`] = el; }}
+            className="absolute bottom-2 left-2 flex gap-0.5 items-end transition-opacity duration-100"
+            style={{ opacity: 0 }}
           >
-            LEAVE GAME
-          </button>
-        </div>
-      </div>
-
-      {/* Chat Sidebar */}
-      {chatOpen && (
-        <div className="fixed right-0 top-0 h-full w-96 bg-slate-900 border-l border-purple-500/20 shadow-2xl z-50 flex flex-col animate-slideInRight">
-          <div className="p-6 border-b border-purple-500/20 flex justify-between items-center">
-            <h3 className="text-2xl font-black">Chat</h3>
-            <button onClick={() => setChatOpen(false)} className="text-2xl hover:text-red-400">✕</button>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-6 space-y-4">
-            {messages.map((msg, i) => (
-              <div key={i} className="bg-slate-800/50 rounded-xl p-3">
-                <div className="text-sm font-bold text-purple-300">{msg.from}</div>
-                <div className="text-white">{msg.text}</div>
-              </div>
+            {[3,5,4,6,3].map((h, i) => (
+              <div key={i} className="w-0.5 bg-emerald-400 rounded-full animate-bounce"
+                style={{ height: `${h * 2}px`, animationDelay: `${i * 80}ms` }} />
             ))}
           </div>
 
-          <div className="p-6 border-t border-purple-500/20">
-            <div className="flex gap-3">
-              <input
-                type="text"
-                value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                placeholder="Type a message..."
-                className="flex-1 px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white"
-              />
+          <div className="absolute bottom-2 right-2 flex gap-1">
+            {isMe && !voiceEnabled && (
+              <div className="w-5 h-5 bg-red-600/90 rounded-full flex items-center justify-center text-xs">🔇</div>
+            )}
+            {isMe && !videoEnabled && (
+              <div className="w-5 h-5 bg-red-600/90 rounded-full flex items-center justify-center text-xs">📵</div>
+            )}
+          </div>
+        </div>
+
+        <div className="px-3 py-2 flex items-center justify-between">
+          <div>
+            <div className="text-xs font-semibold text-white truncate max-w-[100px]">
+              {isMe ? `${player.username} (You)` : player.username}
+            </div>
+            <div className="text-[10px] text-slate-500">Lvl {player.level}</div>
+          </div>
+          {!isMe && (
+            <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
               <button
-                onClick={handleSendMessage}
-                className="px-6 py-3 bg-purple-600 hover:bg-purple-500 rounded-xl font-bold"
-              >
-                Send
-              </button>
+                onClick={e => { e.stopPropagation(); onAddFriend(player.userId); }}
+                className="w-6 h-6 bg-blue-600/80 hover:bg-blue-500 rounded-full flex items-center justify-center text-xs"
+              >➕</button>
+              <button
+                onClick={e => { e.stopPropagation(); onReport(player.userId); }}
+                className="w-6 h-6 bg-red-600/80 hover:bg-red-500 rounded-full flex items-center justify-center text-xs"
+              >🚫</button>
             </div>
-          </div>
+          )}
         </div>
-      )}
+      </div>
+    </div>
+  );
+}, (prev, next) => {
+  // Only re-render when these props actually change
+  return (
+    prev.videoEnabled === next.videoEnabled &&
+    prev.voiceEnabled === next.voiceEnabled &&
+    prev.remoteStreams?.[prev.player.userId] === next.remoteStreams?.[next.player.userId] &&
+    prev.playersInGame === next.playersInGame
+  );
+});
+export default function GameRoom({ socket, user }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { gameData } = location.state || {};
 
-      {/* Player Stats Modal */}
-      {showPlayerStats && (
-        <div 
-          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-6"
-          onClick={() => setShowPlayerStats(null)}
-        >
-          <div 
-            className="bg-slate-900 rounded-3xl p-8 max-w-md w-full border-2 border-purple-500/30 animate-scaleIn"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="text-center mb-6">
-              <div className="w-32 h-32 rounded-full bg-gradient-to-br from-purple-600 to-pink-600 flex items-center justify-center text-6xl mx-auto mb-4">
-                {showPlayerStats.avatar || '👤'}
-              </div>
-              <h3 className="text-3xl font-black mb-2">{showPlayerStats.username}</h3>
-              <div className="text-slate-400">Level {showPlayerStats.level}</div>
-            </div>
+  // ── Game State ──
+  const [greetPhase, setGreetPhase] = useState(true);
+  const [greetTimer, setGreetTimer] = useState(30);
+  const [currentQuestion, setCurrentQuestion] = useState(null);
+  const [questionNumber, setQuestionNumber] = useState(0);
+  const [totalQuestions, setTotalQuestions] = useState(gameData?.totalQuestions || 10);
+  const [nextQuestionVotes, setNextQuestionVotes] = useState(0);
+  const [votedForNext, setVotedForNext] = useState(false);
+  const [playersInGame, setPlayersInGame] = useState([]);
+  const [gameEnded, setGameEnded] = useState(false);
 
-            <div className="space-y-3">
-              <div className="flex justify-between bg-slate-800/50 p-4 rounded-xl">
-                <span className="text-slate-400">XP</span>
-                <span className="font-bold">{showPlayerStats.xp || 0}</span>
-              </div>
-              <div className="flex justify-between bg-slate-800/50 p-4 rounded-xl">
-                <span className="text-slate-400">Games Played</span>
-                <span className="font-bold">{showPlayerStats.stats?.gamesPlayed || 0}</span>
-              </div>
-              <div className="flex justify-between bg-slate-800/50 p-4 rounded-xl">
-                <span className="text-slate-400">Wins</span>
-                <span className="font-bold text-green-400">{showPlayerStats.stats?.wins || 0}</span>
-              </div>
-              <div className="flex justify-between bg-slate-800/50 p-4 rounded-xl">
-                <span className="text-slate-400">Win Rate</span>
-                <span className="font-bold text-purple-400">
-                  {showPlayerStats.stats?.gamesPlayed 
-                    ? Math.round((showPlayerStats.stats.wins / showPlayerStats.stats.gamesPlayed) * 100)
-                    : 0}%
-                </span>
-              </div>
-            </div>
+  // ── Players ──
+  const [myTeam, setMyTeam] = useState(gameData?.myMembers || []);
+  const [opponentTeam, setOpponentTeam] = useState(gameData?.opponentMembers || []);
+  const allPlayers = [...myTeam, ...opponentTeam];
 
-            <button
-              onClick={() => setShowPlayerStats(null)}
-              className="w-full mt-6 py-3 bg-purple-600 hover:bg-purple-500 rounded-xl font-bold"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      )}
+  // ── WebRTC ──
+  const localStreamRef = useRef(null);
+  const peerConnectionsRef = useRef({});
+  const localVideoRef = useRef(null);
+  const [remoteStreams, setRemoteStreams] = useState({});
+  const [videoEnabled, setVideoEnabled] = useState(false);
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  
+  const speakingRingRefs = useRef({});
+  const audioContextsRef = useRef({});
 
-      <style jsx>{`
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(20px); }
+  // ── Chat ──
+  const [chatOpen, setChatOpen] = useState(false);
+  const [messages, setMessages] = useState([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [unreadCount, setUnreadCount] = useState(0);
+  const messagesEndRef = useRef(null);
+
+  // ── UI ──
+  const [showPlayerModal, setShowPlayerModal] = useState(null);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [notification, setNotification] = useState(null);
+
+  const iceConfig = {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+    ]
+  };
+
+  // ── Notify helper ──
+  const notify = (msg, type = 'info') => {
+    setNotification({ msg, type });
+    setTimeout(() => setNotification(null), 3000);
+  };
+
+  // ── Speaking detection ──
+const startSpeakingDetection = useCallback((stream, userId) => {
+  try {
+    const audioCtx = new AudioContext();
+    const analyser = audioCtx.createAnalyser();
+    const source = audioCtx.createMediaStreamSource(stream);
+    source.connect(analyser);
+    analyser.fftSize = 512;
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+    audioContextsRef.current[userId] = audioCtx;
+
+    const check = () => {
+      if (!audioContextsRef.current[userId]) return;
+      analyser.getByteFrequencyData(dataArray);
+      const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+      const speaking = avg > 15;
+
+      // ← Direct DOM manipulation, no React state, no re-render
+      const ring = speakingRingRefs.current[userId];
+      const wave = speakingRingRefs.current[`wave_${userId}`];
+      if (ring) {
+        ring.style.opacity = speaking ? '1' : '0';
+      }
+      if (wave) wave.style.opacity = speaking ? '1' : '0';
+
+      requestAnimationFrame(check);
+    };
+    check();
+  } catch (e) { console.warn('Audio detection error:', e); }
+}, []);
+
+  // ── WebRTC: create peer connection ──
+  const createPeerConnection = useCallback((targetUserId) => {
+    if (peerConnectionsRef.current[targetUserId]) {
+      return peerConnectionsRef.current[targetUserId];
+    }
+    const pc = new RTCPeerConnection(iceConfig);
+
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => {
+        pc.addTrack(track, localStreamRef.current);
+      });
+    }
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate && socket) {
+        socket.emit('webrtc:ice', {
+          candidate: event.candidate,
+          targetUserId,
+          fromUserId: user._id,
+          gameId: gameData?.gameId,
+        });
+      }
+    };
+
+    pc.ontrack = (event) => {
+      const stream = event.streams[0];
+      setRemoteStreams(prev => ({ ...prev, [targetUserId]: stream }));
+      startSpeakingDetection(stream, targetUserId);
+    };
+
+    pc.onconnectionstatechange = () => {
+      if (['failed', 'disconnected', 'closed'].includes(pc.connectionState)) {
+        pc.close();
+        delete peerConnectionsRef.current[targetUserId];
+        setRemoteStreams(prev => {
+          const u = { ...prev }; delete u[targetUserId]; return u;
+        });
+      }
+    };
+
+    peerConnectionsRef.current[targetUserId] = pc;
+    return pc;
+  }, [socket, user, gameData, startSpeakingDetection]);
+
+  // ── WebRTC: call a peer ──
+  const callPeer = useCallback(async (targetUserId) => {
+    if (targetUserId === user?._id) return;
+    try {
+      const pc = createPeerConnection(targetUserId);
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      socket?.emit('webrtc:offer', {
+        offer, targetUserId,
+        fromUserId: user._id,
+        gameId: gameData?.gameId,
+      });
+    } catch (e) { console.error('callPeer error:', e); }
+  }, [createPeerConnection, socket, user, gameData]);
+
+  // ── Start local media ──
+  const startLocalMedia = useCallback(async (withVideo, withAudio) => {
+    try {
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(t => t.stop());
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: withVideo,
+        audio: withAudio,
+      });
+      localStreamRef.current = stream;
+
+      if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+      startSpeakingDetection(stream, user._id);
+
+      // Update existing peer connections
+      Object.entries(peerConnectionsRef.current).forEach(([, pc]) => {
+        stream.getTracks().forEach(track => {
+          const sender = pc.getSenders().find(s => s.track?.kind === track.kind);
+          if (sender) sender.replaceTrack(track);
+          else pc.addTrack(track, stream);
+        });
+      });
+
+      return stream;
+    } catch (e) {
+      notify('Could not access camera/microphone', 'error');
+      throw e;
+    }
+  }, [user, startSpeakingDetection]);
+
+  // ── Toggle video ──
+  const handleToggleVideo = async () => {
+    try {
+      if (!videoEnabled) {
+        await startLocalMedia(true, true);
+        setVideoEnabled(true);
+        setVoiceEnabled(true);
+        const others = allPlayers.filter(p => p.userId !== user._id).map(p => p.userId);
+        for (const id of others) await callPeer(id);
+      } else {
+        localStreamRef.current?.getVideoTracks().forEach(t => { t.stop(); t.enabled = false; });
+        if (localVideoRef.current) localVideoRef.current.srcObject = null;
+        setVideoEnabled(false);
+      }
+    } catch (e) { console.error('toggleVideo error:', e); }
+  };
+
+  // ── Toggle voice ──
+  const handleToggleVoice = async () => {
+    try {
+      if (!voiceEnabled) {
+        await startLocalMedia(videoEnabled, true);
+        setVoiceEnabled(true);
+        const others = allPlayers.filter(p => p.userId !== user._id).map(p => p.userId);
+        for (const id of others) await callPeer(id);
+      } else {
+        localStreamRef.current?.getAudioTracks().forEach(t => { t.enabled = false; });
+        setVoiceEnabled(false);
+      }
+    } catch (e) { console.error('toggleVoice error:', e); }
+  };
+
+  // ── Socket: game events ──
+  useEffect(() => {
+    if (!socket || !gameData) return;
+
+    // Join game room
+    socket.emit('game:join', { gameId: gameData.gameId, userId: user._id });
+
+    socket.on('game:playerJoined', ({ userId, activePlayers }) => {
+      setPlayersInGame(activePlayers);
+      if (localStreamRef.current && userId !== user._id) callPeer(userId);
+    });
+
+    socket.on('game:greetPhase', ({ duration }) => {
+      setGreetPhase(true);
+      setGreetTimer(duration);
+      let t = duration;
+      const iv = setInterval(() => {
+        t--;
+        setGreetTimer(t);
+        if (t <= 0) { clearInterval(iv); setGreetPhase(false); }
+      }, 1000);
+    });
+
+    socket.on('game:discussionQuestion', ({ question, questionNumber, totalQuestions }) => {
+      setCurrentQuestion(question);
+      setQuestionNumber(questionNumber);
+      setTotalQuestions(totalQuestions);
+      setVotedForNext(false);
+      setNextQuestionVotes(0);
+      notify(`Question ${questionNumber} of ${totalQuestions}`, 'info');
+    });
+
+    socket.on('game:nextQuestionVote', ({ votes, required }) => {
+      setNextQuestionVotes(votes);
+    });
+
+    socket.on('game:playerLeft', ({ userId, remainingPlayers }) => {
+      setPlayersInGame(remainingPlayers);
+      const player = allPlayers.find(p => p.userId === userId);
+      notify(`${player?.username || 'A player'} left the game`, 'warning');
+      if (peerConnectionsRef.current[userId]) {
+        peerConnectionsRef.current[userId].close();
+        delete peerConnectionsRef.current[userId];
+      }
+      setRemoteStreams(prev => { const u = { ...prev }; delete u[userId]; return u; });
+    });
+
+    socket.on('game:ended', (data) => {
+      setGameEnded(true);
+      setTimeout(() => navigate('/game-results', { state: { results: data } }), 2000);
+    });
+
+    socket.on('game:chat:message', ({ userId, username, message, timestamp }) => {
+      setMessages(prev => [...prev, { userId, username, message, timestamp }]);
+      if (!chatOpen) setUnreadCount(prev => prev + 1);
+    });
+
+    // WebRTC signaling
+    socket.on('webrtc:offer', async ({ offer, fromUserId }) => {
+      const pc = createPeerConnection(fromUserId);
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      socket.emit('webrtc:answer', {
+        answer, targetUserId: fromUserId,
+        fromUserId: user._id, gameId: gameData.gameId,
+      });
+    });
+
+    socket.on('webrtc:answer', async ({ answer, fromUserId }) => {
+      const pc = peerConnectionsRef.current[fromUserId];
+      if (pc) await pc.setRemoteDescription(new RTCSessionDescription(answer));
+    });
+
+    socket.on('webrtc:ice', async ({ candidate, fromUserId }) => {
+      const pc = peerConnectionsRef.current[fromUserId];
+      if (pc) {
+        try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); }
+        catch (e) { console.warn('ICE error:', e); }
+      }
+    });
+
+    return () => {
+      socket.off('game:playerJoined');
+      socket.off('game:greetPhase');
+      socket.off('game:discussionQuestion');
+      socket.off('game:nextQuestionVote');
+      socket.off('game:playerLeft');
+      socket.off('game:ended');
+      socket.off('game:chat:message');
+      socket.off('webrtc:offer');
+      socket.off('webrtc:answer');
+      socket.off('webrtc:ice');
+    };
+  }, [socket, gameData, user, callPeer, createPeerConnection, chatOpen]);
+useEffect(() => {
+  if (videoEnabled && localVideoRef.current && localStreamRef.current) {
+    localVideoRef.current.srcObject = localStreamRef.current;
+  }
+}, [videoEnabled]);
+  // ── Cleanup on unmount ──
+  useEffect(() => {
+    return () => {
+      localStreamRef.current?.getTracks().forEach(t => t.stop());
+      Object.values(peerConnectionsRef.current).forEach(pc => pc.close());
+      Object.values(audioContextsRef.current).forEach(ctx => ctx.close());
+      peerConnectionsRef.current = {};
+      audioContextsRef.current = {};
+    };
+  }, []);
+
+  // ── Chat scroll ──
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  const handleVoteNextQuestion = () => {
+    if (votedForNext || !socket) return;
+    setVotedForNext(true);
+    socket.emit('game:voteNextQuestion', { gameId: gameData?.gameId, userId: user._id });
+  };
+
+  const handleSendMessage = () => {
+    if (!newMessage.trim() || !socket) return;
+    socket.emit('game:chat:send', {
+      gameId: gameData?.gameId,
+      userId: user._id,
+      username: user.username,
+      message: newMessage.trim(),
+    });
+    setNewMessage('');
+  };
+
+  const handleLeaveGame = () => {
+    socket?.emit('game:leave', { gameId: gameData?.gameId, userId: user._id });
+    localStreamRef.current?.getTracks().forEach(t => t.stop());
+    Object.values(peerConnectionsRef.current).forEach(pc => pc.close());
+    navigate('/dashboard');
+  };
+
+  const handleAddFriend = async (targetUserId) => {
+    try {
+      await axios.post(`http://localhost:5000/api/friend/request`,
+        { recipientId: targetUserId }, { withCredentials: true });
+      notify('Friend request sent!', 'success');
+    } catch (e) {
+      notify(e.response?.data?.message || 'Failed to send request', 'error');
+    }
+  };
+
+  const handleReport = (targetUserId) => {
+    notify('Report submitted', 'success');
+    // TODO: implement report endpoint
+  };
+
+  const myUserId = user?._id;
+  const totalVoters = allPlayers.length;
+
+  return (
+    <div className="min-h-screen bg-[#070711] text-white flex flex-col overflow-hidden"
+      style={{ fontFamily: "'DM Sans', sans-serif" }}>
+
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=Syne:wght@700;800&display=swap');
+        
+        .font-display { font-family: 'Syne', sans-serif; }
+        
+        @keyframes slideUp {
+          from { opacity: 0; transform: translateY(12px); }
           to { opacity: 1; transform: translateY(0); }
         }
         @keyframes slideInRight {
           from { transform: translateX(100%); }
           to { transform: translateX(0); }
         }
-        @keyframes scaleIn {
-          from { transform: scale(0.9); opacity: 0; }
-          to { transform: scale(1); opacity: 1; }
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
         }
-        .animate-fadeIn {
-          animation: fadeIn 0.5s ease-out;
+        @keyframes pulse-glow {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(167,139,250,0); }
+          50% { box-shadow: 0 0 20px 4px rgba(167,139,250,0.15); }
         }
-        .animate-slideInRight {
-          animation: slideInRight 0.3s ease-out;
+        .animate-slide-up { animation: slideUp 0.4s ease-out; }
+        .animate-slide-right { animation: slideInRight 0.3s ease-out; }
+        .animate-fade { animation: fadeIn 0.3s ease-out; }
+        .glow-pulse { animation: pulse-glow 3s ease-in-out infinite; }
+        
+        .glass {
+          background: rgba(255,255,255,0.03);
+          backdrop-filter: blur(12px);
+          border: 1px solid rgba(255,255,255,0.06);
         }
-        .animate-scaleIn {
-          animation: scaleIn 0.3s ease-out;
-        }
+
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
       `}</style>
+
+      {/* Ambient background */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute top-0 left-1/4 w-96 h-96 bg-violet-600/5 rounded-full blur-[120px]" />
+        <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-amber-600/5 rounded-full blur-[120px]" />
+      </div>
+
+      {/* ── NOTIFICATION TOAST ── */}
+      {notification && (
+        <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-xl text-sm font-medium animate-slide-up
+          ${notification.type === 'success' ? 'bg-emerald-900/90 text-emerald-300 border border-emerald-700/50' :
+            notification.type === 'error' ? 'bg-red-900/90 text-red-300 border border-red-700/50' :
+            notification.type === 'warning' ? 'bg-amber-900/90 text-amber-300 border border-amber-700/50' :
+            'bg-slate-800/90 text-slate-300 border border-slate-700/50'}`}>
+          {notification.msg}
+        </div>
+      )}
+
+      {/* ── GREET PHASE OVERLAY ── */}
+    
+{greetPhase && (
+  <div className="w-full bg-violet-900/30 border-b border-violet-500/30 px-6 py-3 flex items-center justify-between">
+    <div className="flex items-center gap-3">
+      <span className="text-xl">👋</span>
+      <div>
+        <span className="font-semibold text-violet-300 text-sm">Meet your discussants</span>
+        <span className="text-slate-400 text-xs ml-2">— First question drops soon. Turn on camera to say hello!</span>
+      </div>
+    </div>
+    <div className="flex items-center gap-2">
+      {/* Mini media buttons in banner */}
+      <button
+        onClick={handleToggleVideo}
+        className={`w-9 h-9 rounded-lg flex items-center justify-center text-sm transition-all ${
+          videoEnabled ? 'bg-violet-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+        }`}
+      >
+        {videoEnabled ? '📹' : '📵'}
+      </button>
+      <button
+        onClick={handleToggleVoice}
+        className={`w-9 h-9 rounded-lg flex items-center justify-center text-sm transition-all ${
+          voiceEnabled ? 'bg-violet-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+        }`}
+      >
+        {voiceEnabled ? '🎤' : '🔇'}
+      </button>
+      {/* Countdown */}
+      <div className="ml-3 w-10 h-10 rounded-xl bg-violet-600/30 border border-violet-500/40 flex items-center justify-center">
+        <span className="font-display font-bold text-violet-300 text-sm tabular-nums">
+          {greetTimer}s
+        </span>
+      </div>
+    </div>
+  </div>
+)}
+
+      {/* ── GAME ENDED ── */}
+      {gameEnded && (
+        <div className="fixed inset-0 bg-slate-950/90 z-50 flex items-center justify-center animate-fade">
+          <div className="text-center">
+            <div className="text-6xl mb-4">🏁</div>
+            <h2 className="font-display text-4xl font-bold">Discussion Complete</h2>
+            <p className="text-slate-400 mt-2">Redirecting to results...</p>
+          </div>
+        </div>
+      )}
+
+      {/* ── MAIN LAYOUT ── */}
+      <div className="flex-1 flex min-h-0">
+
+        {/* LEFT PANEL — My Team */}
+        <div className="w-52 flex-shrink-0 p-4 flex flex-col gap-3 border-r border-white/5">
+          <div className="text-[10px] font-semibold text-violet-400 uppercase tracking-widest mb-1">
+            Your Team
+          </div>
+          {myTeam.map(player => (
+            <PlayerTile
+            key={player.userId}
+              player={player}
+              isMe={player.userId === myUserId}
+              isMine={true}
+              videoEnabled={videoEnabled}
+             voiceEnabled={voiceEnabled}
+             localVideoRef={localVideoRef}
+             remoteStreams={remoteStreams}
+             speakingRingRefs={speakingRingRefs}
+             playersInGame={playersInGame}
+             onAddFriend={handleAddFriend}
+             onReport={handleReport}
+             onShowProfile={setShowPlayerModal}
+             myUserId={myUserId}
+            />
+          ))}
+        </div>
+
+        {/* CENTER — Main content */}
+        <div className="flex-1 flex flex-col items-center justify-between p-6 gap-4 overflow-y-auto">
+
+          {/* Topic badge */}
+          <div className="w-full max-w-2xl">
+            <div className="flex items-center justify-between">
+              <div className="glass px-4 py-2 rounded-full text-xs text-slate-400">
+                <span className="text-violet-400 font-semibold">{gameData?.topic}</span>
+                <span className="mx-2 text-slate-600">·</span>
+                Discussion
+                <span className="mx-2 text-slate-600">·</span>
+                {gameData?.totalQuestions} questions
+              </div>
+              <div className="glass px-4 py-2 rounded-full text-xs text-slate-500">
+                {playersInGame.length}/{totalVoters} online
+              </div>
+            </div>
+          </div>
+
+          {/* Question card */}
+          <div className="w-full max-w-2xl flex-1 flex flex-col items-center justify-center gap-6">
+            {currentQuestion ? (
+              <div className="w-full animate-slide-up">
+                {/* Question number */}
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="h-px flex-1 bg-gradient-to-r from-transparent to-violet-500/30" />
+                  <span className="text-[10px] text-violet-400 font-mono uppercase tracking-widest">
+                    Question {questionNumber} / {totalQuestions}
+                  </span>
+                  <div className="h-px flex-1 bg-gradient-to-l from-transparent to-violet-500/30" />
+                </div>
+
+                {/* The question */}
+                <div className="glass rounded-2xl p-8 text-center glow-pulse">
+                  <div className="text-2xl font-display font-bold leading-snug text-white mb-2">
+                    {currentQuestion}
+                  </div>
+                  <p className="text-slate-500 text-sm mt-4">
+                    Discuss freely — use voice or chat
+                  </p>
+                </div>
+
+                {/* NEXT QUESTION voting */}
+                <div className="mt-6 flex flex-col items-center gap-3">
+                  {/* Vote progress */}
+                  <div className="flex items-center gap-2 text-xs text-slate-500">
+                    <div className="flex gap-1">
+                      {allPlayers.map((p, i) => (
+                        <div key={i} className={`w-2 h-2 rounded-full transition-all ${
+                          i < nextQuestionVotes ? 'bg-emerald-400' : 'bg-slate-700'
+                        }`} />
+                      ))}
+                    </div>
+                    <span>{nextQuestionVotes}/{totalVoters} ready</span>
+                  </div>
+
+                  <button
+                    onClick={handleVoteNextQuestion}
+                    disabled={votedForNext}
+                    className={`px-8 py-3 rounded-xl font-semibold text-sm transition-all duration-200 ${
+                      votedForNext
+                        ? 'bg-emerald-900/40 text-emerald-400 border border-emerald-700/40 cursor-default'
+                        : 'bg-violet-600 hover:bg-violet-500 text-white hover:scale-[1.02] active:scale-[0.98]'
+                    }`}
+                  >
+                    {votedForNext ? '✓ Voted for next question' : 'Next Question →'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center animate-fade">
+                <div className="text-5xl mb-4 animate-bounce">⏳</div>
+                <p className="font-display text-xl font-bold text-slate-300">
+                  {greetPhase ? 'Get ready...' : 'Loading first question...'}
+                </p>
+                <p className="text-slate-600 text-sm mt-2">AI is preparing your discussion topic</p>
+              </div>
+            )}
+          </div>
+
+          {/* Bottom spacer */}
+          <div className="h-4" />
+        </div>
+
+        {/* RIGHT PANEL — Opponents */}
+        <div className="w-52 flex-shrink-0 p-4 flex flex-col gap-3 border-l border-white/5">
+          <div className="text-[10px] font-semibold text-amber-400 uppercase tracking-widest mb-1">
+            Opponents
+          </div>
+          {opponentTeam.map(player => (
+            <PlayerTile
+              key={player.userId}
+              player={player}
+              isMe={player.userId === myUserId}
+              isMine={false}
+               videoEnabled={videoEnabled}
+              voiceEnabled={voiceEnabled}
+              localVideoRef={localVideoRef}
+              remoteStreams={remoteStreams}
+              speakingRingRefs={speakingRingRefs}
+              playersInGame={playersInGame}
+              onAddFriend={handleAddFriend}
+              onReport={handleReport}
+              onShowProfile={setShowPlayerModal}
+              myUserId={myUserId}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* ── FOOTER CONTROLS ── */}
+      <div className="border-t border-white/5 bg-slate-950/60 backdrop-blur-xl px-6 py-3">
+        <div className="max-w-4xl mx-auto flex items-center justify-between">
+
+          {/* Media controls */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleToggleVideo}
+              className={`w-11 h-11 rounded-xl flex items-center justify-center text-lg transition-all duration-200 ${
+                videoEnabled
+                  ? 'bg-violet-600 hover:bg-violet-500 text-white'
+                  : 'glass hover:bg-white/5 text-slate-400'
+              }`}
+              title={videoEnabled ? 'Turn off camera' : 'Turn on camera'}
+            >
+              {videoEnabled ? '📹' : '📵'}
+            </button>
+
+            <button
+              onClick={handleToggleVoice}
+              className={`w-11 h-11 rounded-xl flex items-center justify-center text-lg transition-all duration-200 ${
+                voiceEnabled
+                  ? 'bg-violet-600 hover:bg-violet-500 text-white'
+                  : 'glass hover:bg-white/5 text-slate-400'
+              }`}
+              title={voiceEnabled ? 'Mute' : 'Unmute'}
+            >
+              {voiceEnabled ? '🎤' : '🔇'}
+            </button>
+
+            <button
+              onClick={() => { setChatOpen(!chatOpen); setUnreadCount(0); }}
+              className={`w-11 h-11 rounded-xl flex items-center justify-center text-lg transition-all duration-200 relative ${
+                chatOpen ? 'bg-violet-600 text-white' : 'glass hover:bg-white/5 text-slate-400'
+              }`}
+              title="Chat"
+            >
+              💬
+              {unreadCount > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-[9px] flex items-center justify-center font-bold">
+                  {unreadCount}
+                </span>
+              )}
+            </button>
+          </div>
+
+          {/* Game info */}
+          <div className="flex items-center gap-4 text-center">
+            <div>
+              <div className="text-[10px] text-slate-600 uppercase tracking-wider">Topic</div>
+              <div className="text-sm font-semibold text-white truncate max-w-[160px]">
+                {gameData?.topic}
+              </div>
+            </div>
+            <div className="h-8 w-px bg-white/5" />
+            <div>
+              <div className="text-[10px] text-slate-600 uppercase tracking-wider">Progress</div>
+              <div className="text-sm font-semibold text-violet-400">
+                {questionNumber}/{totalQuestions}
+              </div>
+            </div>
+          </div>
+
+          {/* Leave */}
+          <button
+            onClick={() => setShowLeaveConfirm(true)}
+            className="px-5 py-2.5 bg-red-600/20 hover:bg-red-600/40 border border-red-600/30 text-red-400 hover:text-red-300 rounded-xl text-sm font-semibold transition-all"
+          >
+            Leave
+          </button>
+        </div>
+      </div>
+
+      {/* ── CHAT SIDEBAR ── */}
+      {chatOpen && (
+        <div className="fixed right-0 top-0 h-full w-80 bg-[#0a0a18] border-l border-white/5 shadow-2xl z-30 flex flex-col animate-slide-right">
+          <div className="p-5 border-b border-white/5 flex justify-between items-center">
+            <h3 className="font-display text-lg font-bold">In-game Chat</h3>
+            <button onClick={() => setChatOpen(false)}
+              className="w-7 h-7 rounded-lg glass flex items-center justify-center text-slate-400 hover:text-white">
+              ✕
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            {messages.length === 0 && (
+              <p className="text-slate-600 text-xs text-center mt-8">
+                No messages yet. Say something!
+              </p>
+            )}
+            {messages.map((msg, i) => {
+              const isMe = msg.userId === myUserId;
+              return (
+                <div key={i} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+                  <span className="text-[10px] text-slate-600 mb-1 px-1">{msg.username}</span>
+                  <div className={`px-3 py-2 rounded-xl text-sm max-w-[220px] break-words ${
+                    isMe
+                      ? 'bg-violet-600/30 text-violet-100 border border-violet-500/20'
+                      : 'glass text-slate-200'
+                  }`}>
+                    {msg.message}
+                  </div>
+                </div>
+              );
+            })}
+            <div ref={messagesEndRef} />
+          </div>
+
+          <div className="p-4 border-t border-white/5">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={newMessage}
+                onChange={e => setNewMessage(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleSendMessage()}
+                placeholder="Message..."
+                className="flex-1 px-3 py-2.5 glass rounded-xl text-sm text-white placeholder-slate-600 outline-none focus:border-violet-500/50 border border-transparent transition-all"
+              />
+              <button
+                onClick={handleSendMessage}
+                disabled={!newMessage.trim()}
+                className="px-4 py-2.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-30 rounded-xl text-sm font-semibold transition-all"
+              >
+                →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── LEAVE CONFIRM ── */}
+      {showLeaveConfirm && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center animate-fade"
+          onClick={() => setShowLeaveConfirm(false)}>
+          <div className="glass rounded-2xl p-8 max-w-sm w-full mx-4" onClick={e => e.stopPropagation()}>
+            <h3 className="font-display text-xl font-bold mb-2">Leave the discussion?</h3>
+            <p className="text-slate-400 text-sm mb-6">
+              You can rejoin if the game is still active. The discussion continues without you.
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setShowLeaveConfirm(false)}
+                className="flex-1 py-2.5 glass hover:bg-white/5 rounded-xl text-sm font-semibold transition-all">
+                Stay
+              </button>
+              <button onClick={handleLeaveGame}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 rounded-xl text-sm font-semibold transition-all">
+                Leave
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── PLAYER PROFILE MODAL ── */}
+      {showPlayerModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center animate-fade"
+          onClick={() => setShowPlayerModal(null)}>
+          <div className="glass rounded-2xl p-8 max-w-sm w-full mx-4" onClick={e => e.stopPropagation()}>
+            <div className="text-center mb-6">
+              <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-violet-600 to-pink-600 flex items-center justify-center text-4xl mx-auto mb-4">
+                {showPlayerModal.avatar || '👤'}
+              </div>
+              <h3 className="font-display text-2xl font-bold">{showPlayerModal.username}</h3>
+              <p className="text-slate-500 text-sm mt-1">Level {showPlayerModal.level}</p>
+            </div>
+
+            <div className="space-y-2 mb-6">
+              {[
+                ['XP', showPlayerModal.xp || 0],
+                ['Games Played', showPlayerModal.stats?.gamesPlayed || 0],
+                ['Wins', showPlayerModal.stats?.wins || 0],
+                ['Win Rate', showPlayerModal.stats?.gamesPlayed
+                  ? `${Math.round((showPlayerModal.stats.wins / showPlayerModal.stats.gamesPlayed) * 100)}%`
+                  : '0%'],
+              ].map(([label, value]) => (
+                <div key={label} className="flex justify-between items-center glass px-4 py-3 rounded-xl">
+                  <span className="text-slate-500 text-sm">{label}</span>
+                  <span className="font-semibold text-sm">{value}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => { handleAddFriend(showPlayerModal.userId); setShowPlayerModal(null); }}
+                className="flex-1 py-2.5 bg-blue-600/30 hover:bg-blue-600/50 border border-blue-500/30 text-blue-300 rounded-xl text-sm font-semibold transition-all"
+              >
+                ➕ Add Friend
+              </button>
+              <button
+                onClick={() => { handleReport(showPlayerModal.userId); setShowPlayerModal(null); }}
+                className="flex-1 py-2.5 bg-red-600/20 hover:bg-red-600/30 border border-red-500/20 text-red-400 rounded-xl text-sm font-semibold transition-all"
+              >
+                🚫 Report
+              </button>
+            </div>
+
+            <button onClick={() => setShowPlayerModal(null)}
+              className="w-full mt-3 py-2.5 glass hover:bg-white/5 rounded-xl text-sm text-slate-400 transition-all">
+              Close
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

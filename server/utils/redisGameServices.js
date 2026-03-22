@@ -62,7 +62,7 @@ export const addToQueue = async (userId, queueData) => {
     opponentType,
     gameMode,
     stance: stance || '',
-    class: playerClass,
+    playerClass,
     teamId: teamId || '',
     onlineTeamMembers,
     joinedAt: Date.now(),
@@ -157,30 +157,27 @@ export const deleteTempTeam = async (tempTeamId) => {
 // ─────────────────────────────────────────────
 
 export const createGameSession = async ({
-  gameId, topic, totalQuestions, mode,
-  gameMode,
-  teamAId, teamBId,
-  teamAMembers, teamBMembers, // arrays of userId strings
+  gameId, topic, totalQuestions,
+  gameMode,teamAMembers, teamBMembers,currentTeam, // arrays of userId strings
+  questionsAsked, status, teamAScore, teamBScore,
   teamAStance, teamBStance,
 }) => {
   await redis.hset(K.gameSession(gameId), {
     gameId,
     topic,
     totalQuestions,
-    questionsAsked: 0,
-    status: 'greet',       // greet → active → done
-    mode,
     gameMode: gameMode || 'quiz',
-    teamAId,
-    teamBId,
     teamAMembers: teamAMembers.join(','),  // ← FIXED: store as comma-separated
     teamBMembers: teamBMembers.join(','),  // ← FIXED
+    currentTeam, 
+    questionsAsked,
+    status,
+    teamAScore,
+    teamBScore,
     teamAStance: teamAStance || '',
     teamBStance: teamBStance || '',
-    currentTeam: 'teamA',  // teamA goes first (set after random pick)
+                                      // teamA goes first (set after random pick)
     currentTurnIndex: 0,
-    teamAScore: 0,
-    teamBScore: 0,
     startedAt: Date.now(),
   });
   await redis.expire(K.gameSession(gameId), 60 * 60 * 2); // 2 hour max
@@ -526,19 +523,6 @@ export const getQuestionHistory = async (gameId) => {
 // DISCUSSION MODE - AI QUESTIONS & LEADER READY
 // ─────────────────────────────────────────────
 
-export const setDiscussionQuestion = async (gameId, questionNumber, question) => {
-  await redis.hset(`game:${gameId}:discussionQuestion`, {
-    questionNumber,
-    question,
-    timestamp: Date.now(),
-  });
-  await redis.expire(`game:${gameId}:discussionQuestion`, 60 * 60 * 2);
-};
-
-export const getDiscussionQuestion = async (gameId) => {
-  return await redis.hgetall(`game:${gameId}:discussionQuestion`);
-};
-
 export const isDiscussionLeader = async (gameId, userId) => {
   const leaders = await redis.smembers(`game:${gameId}:leaders`);
   return leaders.includes(userId);
@@ -564,4 +548,42 @@ export const areBothLeadersReady = async (gameId) => {
 
 export const clearLeaderReadyStates = async (gameId) => {
   await redis.del(`game:${gameId}:leadersReady`);
+};
+// new functions
+// Add these functions
+export const addNextQuestionVote = async (gameId, userId) => {
+  await redis.sadd(`game:${gameId}:votes:next`, userId);
+  await redis.expire(`game:${gameId}:votes:next`, 3600);
+};
+
+export const getNextQuestionVotes = async (gameId) => {
+  return await redis.smembers(`game:${gameId}:votes:next`);
+};
+
+export const clearNextQuestionVotes = async (gameId) => {
+  await redis.del(`game:${gameId}:votes:next`);
+};
+
+export const setCurrentQuestionNumber = async (gameId, num) => {
+  await redis.hset(`game:${gameId}:session`, 'currentQuestionNumber', num);
+};
+
+export const setDiscussionQuestion = async (gameId, questionNum, question) => {
+  await redis.set(`game:${gameId}:dq:${questionNum}`, question, 'EX', 7200);
+};
+
+export const getDiscussionQuestion = async (gameId, questionNum) => {
+  return await redis.get(`game:${gameId}:dq:${questionNum}`);
+};
+export const setGameStatus = async (gameId, status) => {
+  await redis.hset(K.gameSession(gameId), 'status', status);
+};
+export const removeActivePlayer = async (gameId, userId) => {
+  await redis.srem(K.activePlayers(gameId), userId);
+};
+
+
+export const setUserOffGame = async (userId) => {
+  await redis.hset(`user:${userId}:online`, 'isInGame', 'false');
+  await redis.hdel(`user:${userId}:online`, 'gameId');
 };

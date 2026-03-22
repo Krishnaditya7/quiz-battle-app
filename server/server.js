@@ -65,14 +65,6 @@ app.post('/test/answer', async (req, res) => {
   }
 });
 
-app.post('/test/discussion', async (req, res) => {
-  try {
-    const result = await generateDiscussionQuestion(req.body.topic, 1);
-    res.json({ topic: req.body.topic, question: result });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
 app.post('/test/debate', async (req, res) => {
   try {
