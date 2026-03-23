@@ -27,7 +27,6 @@ export const getQueueStatus = async (req, res) => {
       entry.topic,
       entry.questionCount,
       entry.opponentType,
-      entry.gameMode,
       entry.playerCount
     );
 

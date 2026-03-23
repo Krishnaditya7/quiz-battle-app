@@ -3,7 +3,7 @@
    GLOBAL ANIMATIONS & STYLES
    Import this in main.jsx or index.css
    ============================================================ */
-
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Space+Mono:wght@400;700&display=swap');
 /* Fade In Animation */
 @keyframes fadeIn {
   from {

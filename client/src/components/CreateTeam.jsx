@@ -29,9 +29,7 @@ export default function TeamManagementModal({ show, onClose, socket, user}) {
     questionCount: 10,
     playerCount: 4,
     opponentType: 'squad',
-    gameMode: 'quiz',
     topicCategory: 'learning',
-    stance: ''
   });
   const scrollToBottom = () => {
   messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -253,13 +251,8 @@ const formatDate = (dateStr) => {
       return;
     }
 
-    if (!queueData.topic || !queueData.gameMode) {
-      alert('Please select topic and game mode');
-      return;
-    }
-
-    if (queueData.gameMode === 'debate' && !queueData.stance) {
-      alert('Please select stance for debate');
+    if (!queueData.topic) {
+      alert('Please select topic');
       return;
     }
 
@@ -287,8 +280,6 @@ const formatDate = (dateStr) => {
         topic: queueData.topic,
         questionCount: queueData.questionCount,
         playerCount: queueData.playerCount,
-        gameMode: queueData.gameMode,
-        stance: queueData.stance || null,
         opponentType: queueData.opponentType,
         teamId: selectedTeam._id,
         onlineTeamMembers: [],
@@ -889,20 +880,6 @@ const handleInvite = async () => {
                   {selectedTeam.topics?.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
 
-                {/* Game Mode */}
-                <div className="grid grid-cols-3 gap-2">
-                  {['quiz', 'debate', 'discussion'].map(mode => (
-                    <button
-                      key={mode}
-                      onClick={() => setQueueData({...queueData, gameMode: mode})}
-                      className={`py-2 rounded-xl capitalize ${
-                        queueData.gameMode === mode ? 'bg-purple-600' : 'bg-slate-800'
-                      }`}
-                    >
-                      {mode}
-                    </button>
-                  ))}
-                </div>
 
                 {/* Player Count */}
                 <div>
@@ -943,33 +920,6 @@ const handleInvite = async () => {
                    </div>
                </div>
 
-                {/* Question Count */}
-                {queueData.gameMode !== 'discussion' && (
-                  <select
-                    value={queueData.questionCount}
-                    onChange={(e) => setQueueData({...queueData, questionCount: parseInt(e.target.value)})}
-                    className="w-full px-4 py-3 bg-slate-800 rounded-xl text-white"
-                  >
-                    {[5, 10, 15, 20].map(n => <option key={n} value={n}>{n} Questions</option>)}
-                  </select>
-                )}
-
-                {/* Stance (Debate) */}
-                {queueData.gameMode === 'debate' && (
-                  <div className="grid grid-cols-2 gap-2">
-                    {['for', 'against'].map(s => (
-                      <button
-                        key={s}
-                        onClick={() => setQueueData({...queueData, stance: s})}
-                        className={`py-2 rounded-xl capitalize ${
-                          queueData.stance === s ? 'bg-purple-600' : 'bg-slate-800'
-                        }`}
-                      >
-                        {s}
-                      </button>
-                    ))}
-                  </div>
-                )}
 
                 <div className="flex gap-3 mt-6">
                   <button

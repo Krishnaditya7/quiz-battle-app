@@ -8,25 +8,13 @@ import K from '../config/redisKeys.js';
 import * as R from '../utils/redisGameServices.js';
 import { saveCompletedGame } from '../controllers/gameController.js';
 import User from '../models/Users.js';
-import aiHelpers from './aiHelpers.js';
+import { generateDiscussionQuestion } from './aiHelpers.js';
 import Team from '../models/Team.js';
 import Message from '../models/Message.js';
+import GameHistory from '../models/Gamehistory.js';
 
 const shuffle = (arr) => [...arr].sort(() => Math.random() - 0.5);
 
-const STOP_WORDS = new Set(['is', 'are', 'was', 'were', 'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'it', 'its']);
-
-export const checkAnswerMatch = (givenAnswer, correctAnswer) => {
-    const normalize = (str) =>
-        str.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => !STOP_WORDS.has(w));
-
-    const givenWords = normalize(givenAnswer);
-    const correctWords = normalize(correctAnswer);
-
-    if (!correctWords.length) return false;
-    const matchCount = givenWords.filter(w => correctWords.includes(w)).length;
-    return matchCount / correctWords.length >= 0.6;
-};
 // Add this helper function at the top of socketGameService.js
 export const sendNotificationToUser = async (io, recipientId, notification) => {
   const userData = await R.getUserOnlineData(recipientId);
@@ -40,91 +28,82 @@ export const registerGameSockets = (io) => {
     redis.config('SET', 'notify-keyspace-events', 'Ex');
     const redisSub = redis.duplicate();
     redisSub.subscribe('__keyevent@0__:expired');
-    redisSub.on('message', async (channel, expiredKey) => {
-        await handleTimerExpiry(io, expiredKey);
-    });
 
     io.on('connection', (socket) => {
-        console.log(`🔌 Socket connected: ${socket.id}`);
+      console.log(`🔌 Socket connected: ${socket.id}`);
 
-        socket.on('user:online', async ({ userId, username, level }) => {
-            socket.userId = userId;
-            await R.setUserOnline(userId, socket.id, username, level);
-            socket.join(`user:${userId}`);
-            console.log(`👤 ${username} is online`);
+      socket.on('user:online', async ({ userId, username, level }) => {
+        socket.userId = userId;
+        await R.setUserOnline(userId, socket.id, username, level);
+        socket.join(`user:${userId}`);
+        console.log(`👤 ${username} is online`);
         });
-socket.on('match:joinQueue', async ({ userId, topic, questionCount, 
-  gameMode, opponentType, playerCount, stance, teamId }) => {
-  try {
+      socket.on('match:joinQueue', async ({ userId, topic, questionCount, 
+       opponentType, playerCount, teamId }) => {
+      try {
 
-    // ── Validate ──
-    if (!userId || !topic || !questionCount || !gameMode || !playerCount || !opponentType) {
-      return socket.emit('error', { message: 'Missing required fields' });
-    }
-    if (!['quiz', 'debate', 'discussion'].includes(gameMode)) {
-      return socket.emit('error', { message: 'Invalid game mode' });
-    }
-    if (!['solo', 'duo', 'trio', 'squad', 'default'].includes(opponentType)) {
-      return socket.emit('error', { message: 'Invalid opponent type' });
-    }
-    if (![5, 10, 15, 20].includes(parseInt(questionCount))) {
-      return socket.emit('error', { message: 'Invalid question count' });
-    }
-    if (gameMode === 'debate' && (!stance || !['for', 'against'].includes(stance))) {
-      return socket.emit('error', { message: 'Stance required for debate' });
-    }
-    if (playerCount < 1 || playerCount > 4) {
-      return socket.emit('error', { message: 'playerCount must be 1-4' });
-    }
 
-    // ── Already in queue? ──
-    const existingEntry = await R.getUserQueueEntry(userId);
-    if (existingEntry) {
-      return socket.emit('error', { message: 'Already in queue. Leave first.' });
-    }
 
-    // ── Get user ──
-    const user = await User.findById(userId)
-      .select('username level class currentTeam');
-    if (!user) {
-      return socket.emit('error', { message: 'User not found' });
-    }
-    socket.userId = userId;
+        // ── Validate ──
+        if (!userId || !topic || !questionCount || !playerCount || !opponentType) {
+          return socket.emit('error', { message: 'Missing required fields' });
+        }
+        if (!['solo', 'duo', 'trio', 'squad', 'default'].includes(opponentType)) {
+          return socket.emit('error', { message: 'Invalid opponent type' });
+        }
+        if (![5, 10, 15, 20].includes(parseInt(questionCount))) {
+          return socket.emit('error', { message: 'Invalid question count' });
+        }
+        if (playerCount < 1 || playerCount > 4) {
+          return socket.emit('error', { message: 'playerCount must be 1-4' });
+        }
 
-    // ── Helper: class string → number ──
-    const classToNum = (cls) => {
-      if (!cls) return 9;
-      if (cls === 'Other' || cls === 'College') return 13;
-      const num = parseInt(cls);
-      return isNaN(num) ? 9 : num;
-    };
+        // ── Already in queue? ──
+        const existingEntry = await R.getUserQueueEntry(userId);
+        if (existingEntry) {
+          return socket.emit('error', { message: 'Already in queue. Leave first.' });
+        }
 
-    // ════════════════════════════════════
-    // ── SOLO PATH — handle first, return early ──
-    // ════════════════════════════════════
-    if (!teamId) {
-      // Clear currentTeam just in case (safety)
-      await User.findByIdAndUpdate(userId, { $unset: { currentTeam: '' } });
+        // ── Get user ──
+        const user = await User.findById(userId)
+          .select('username level class currentTeam');
+        if (!user) {
+          return socket.emit('error', { message: 'User not found' });
+        }
+        socket.userId = userId;
 
-      await R.addToQueue(userId, {
-        username: user.username,
-        level: user.level,
-        playerClass: user.class || 'Other',
-        topic,
-        questionCount: parseInt(questionCount),
-        playerCount,
+        // ── Helper: class string → number ──
+        const classToNum = (cls) => {
+          if (!cls) return 9;
+          if (cls === 'Other' || cls === 'College') return 13;
+          const num = parseInt(cls);
+          return isNaN(num) ? 9 : num;
+        };
+
+        // ════════════════════════════════════
+        // ── SOLO PATH — handle first, return early ──
+        // ════════════════════════════════════
+        if (!teamId) {
+          // Clear currentTeam just in case (safety)
+          await User.findByIdAndUpdate(userId, { $unset: { currentTeam: '' } });
+
+          await R.addToQueue(userId, {
+            username: user.username,
+            level: user.level,
+            playerClass: user.class || 'Other',
+            topic,
+            questionCount: parseInt(questionCount),
+            playerCount,
         opponentType,
-        gameMode,
-        stance: stance || null,
         teamId: null,
         onlineTeamMembers: '',
       });
 
-      socket.join(`queue:${topic}:${questionCount}:${gameMode}`);
+      socket.join(`queue:${topic}:${questionCount}`);
 
       socket.emit('match:queued', {
         message: 'Searching for opponent...',
-        queueData: { topic, questionCount, playerCount, gameMode, opponentType, stance: stance || null },
+        queueData: { topic, questionCount, playerCount, opponentType },
         myTeam: {
           name: user.username,
           members: [{ username: user.username, level: user.level, avatar: '👤' }]
@@ -132,7 +111,7 @@ socket.on('match:joinQueue', async ({ userId, topic, questionCount,
       });
 
       console.log(`🎯 Solo queue: ${user.username}`);
-      await tryMatch(io, { topic, questionCount, teamId, gameMode });
+      await tryMatch(io, { topic, questionCount, teamId});
       return; // ← exit here, never reaches team logic
     }
 
@@ -220,9 +199,7 @@ socket.on('match:joinQueue', async ({ userId, topic, questionCount,
       topic,
       questionCount: parseInt(questionCount),
       playerCount,
-      gameMode,
       opponentType,
-      stance: stance || null,
     };
 
     // ── Add each member to queue + notify ──
@@ -235,8 +212,6 @@ socket.on('match:joinQueue', async ({ userId, topic, questionCount,
         questionCount: parseInt(questionCount),
         playerCount,
         opponentType,
-        gameMode,
-        stance: stance || null,
         teamId,
         onlineTeamMembers: onlineTeamMembersStr,
       });
@@ -247,7 +222,7 @@ socket.on('match:joinQueue', async ({ userId, topic, questionCount,
       const memberSocket = io.sockets.sockets.get(memberSocketData.socketId);
       if (!memberSocket) continue;
 
-      memberSocket.join(`queue:${topic}:${questionCount}:${gameMode}`);
+      memberSocket.join(`queue:${topic}:${questionCount}`);
 
       // Every member gets full team data ✅
       memberSocket.emit('match:queued', {
@@ -258,7 +233,7 @@ socket.on('match:joinQueue', async ({ userId, topic, questionCount,
     }
 
     console.log(`👥 Team queue: ${teamName} — ${onlineMembers.length} members`);
-    await tryMatch(io, { topic, questionCount, teamId, gameMode });
+    await tryMatch(io, { topic, questionCount, teamId});
 
   } catch (err) {
     console.error('Join queue error:', err);
@@ -271,7 +246,7 @@ socket.on('queue:leave', async (data) => {
       return socket.emit('error', { message: 'userId required' });
     }
 
-    const { userId, topic, questionCount, gameMode } = data;
+    const { userId, topic, questionCount} = data;
     const queueEntry = await R.getUserQueueEntry(userId);
 
     if (!queueEntry) {
@@ -299,7 +274,7 @@ socket.on('queue:leave', async (data) => {
         : [userId];
 
       for (const memberId of memberIds) {
-        await R.removeFromQueue(memberId, topic, questionCount, gameMode);
+        await R.removeFromQueue(memberId, topic, questionCount);
 
         const memberData = await R.getUserOnlineData(memberId);
         if (!memberData?.socketId) continue;
@@ -307,7 +282,7 @@ socket.on('queue:leave', async (data) => {
         const memberSocket = io.sockets.sockets.get(memberData.socketId);
         if (!memberSocket) continue;
 
-        memberSocket.leave(`queue:${topic}:${questionCount}:${gameMode}`);
+        memberSocket.leave(`queue:${topic}:${questionCount}`);
 
         // Redirect ALL members back to /game
         memberSocket.emit('queue:left', { 
@@ -318,8 +293,8 @@ socket.on('queue:leave', async (data) => {
 
     } else {
       // ── SOLO QUEUE ──
-      await R.removeFromQueue(userId, topic, questionCount, gameMode);
-      socket.leave(`queue:${topic}:${questionCount}:${gameMode}`);
+      await R.removeFromQueue(userId, topic, questionCount);
+      socket.leave(`queue:${topic}:${questionCount}`);
       socket.emit('queue:left', { 
         message: 'Left queue successfully',
         redirect: '/game'
@@ -475,11 +450,11 @@ socket.on('chat:editMessage', async ({ teamId, messageId, content }) => {
 
   // All players joined → start the game
   if (activePlayers.length >= totalExpected) {
-    if (session.gameMode === 'discussion') {
-      await startDiscussionGame(io, gameId, session);
-    } else {
-      await startGreetPhase(io, gameId, session);
-    }
+    const alreadyStarted = await redis.get(`game:${gameId}:started`);
+    if (alreadyStarted) return;
+    await redis.set(`game:${gameId}:started`, '1', 'EX', 3600);
+
+    await startDiscussionGame(io, gameId, session);
   }
  });
   socket.on('game:chat:send', ({ gameId, userId, username, message }) => {
@@ -491,8 +466,7 @@ socket.on('chat:editMessage', async ({ teamId, messageId, content }) => {
  socket.on('game:voteNextQuestion', async ({ gameId, userId }) => {
   try {
     const session = await R.getGameSession(gameId);
-    if (session.gameMode !== 'discussion') return;
-    if (session.status !== 'discussion') return;
+    if (session.status !==  'discussion') return;
 
     // Track who voted
     await R.addNextQuestionVote(gameId, userId);
@@ -532,7 +506,7 @@ socket.on('chat:editMessage', async ({ teamId, messageId, content }) => {
       });
 
       // Pre-fetch the question after next
-     aiHelpers.generateDiscussionQuestion(session.topic, nextQ + 1)
+     generateDiscussionQuestion(session.topic, nextQ + 1)
   .then(q => R.setDiscussionQuestion(gameId, nextQ + 1, q))
   .catch(err => console.error(`Pre-fetch Q${nextQ + 1} error:`, err.message));
      
@@ -543,199 +517,60 @@ socket.on('chat:editMessage', async ({ teamId, messageId, content }) => {
     socket.emit('error', { message: 'Failed to process vote' });
   }
  });
- socket.on('game:leave', async ({ gameId, userId }) => {
+ socket.on('game:ratePlayer', async ({ gameId, raterUserId, ratedUserId, stars, questionNumber, question }) => {
   try {
-    const session = await R.getGameSession(gameId);
-    
-    // Remove from active players
+    // Validate
+    if (!gameId || !raterUserId || !ratedUserId || !stars || !questionNumber) return;
+    if (stars < 1 || stars > 5) return;
+    if (raterUserId === ratedUserId) return; // can't rate yourself
+
+    // Store in Redis — key: game:{gameId}:ratings
+    // Format: JSON array pushed to a Redis list
+    const ratingKey = `game:${gameId}:ratings`;
+    const ratingEntry = JSON.stringify({
+      raterUserId,
+      ratedUserId,
+      stars,
+      questionNumber,
+      question: question || '',
+    });
+
+    await redis.rpush(ratingKey, ratingEntry);
+    await redis.expire(ratingKey, 7200); // 2 hours
+
+    console.log(`⭐ ${raterUserId} rated ${ratedUserId} ${stars}★ for Q${questionNumber}`);
+
+  } catch (err) {
+    console.error('game:ratePlayer error:', err.message);
+  }
+});;
+
+socket.on('game:leave', async ({ gameId, userId }) => {
+  try {
     await R.removeActivePlayer(gameId, userId);
     await R.setUserOffGame(userId);
     socket.leave(`game:${gameId}`);
 
     const remainingPlayers = await R.getActivePlayers(gameId);
 
-    if (session.gameMode === 'discussion') {
-      // Notify others
-      io.to(`game:${gameId}`).emit('game:playerLeft', { 
-        userId,
-        remainingPlayers 
-      });
+    io.to(`game:${gameId}`).emit('game:playerLeft', { 
+      userId,
+      remainingPlayers 
+    });
 
-      // Last person left → end game
-      if (remainingPlayers.length === 0) {
-        await R.deleteGameSession(gameId);
-        console.log(`🗑️ Discussion game ${gameId} ended — all players left`);
+    if (remainingPlayers.length === 0) {
+      const session = await R.getGameSession(gameId);
+      if (session) {
+        await saveDiscussionHistory(gameId, session); // ← save before deleting
       }
-      // Note: game continues as long as anyone is still in ✅
-      
-    } else {
-      await handlePlayerLeave(io, socket, gameId, userId);
+      await R.deleteGameSession(gameId);
+      await redis.del(`game:${gameId}:started`);
+      console.log(`🗑️ Game ${gameId} ended — all players left`);
     }
-
   } catch (err) {
     console.error('game:leave error:', err);
   }
- });
-        socket.on('game:askQuestion', async ({ gameId, userId, question, voiceUrl }) => {
-            try {
-                const session = await R.getGameSession(gameId);
-                if (session.status !== 'active') return;
-
-                const currentAsker = await R.getCurrentAsker(gameId);
-                if (currentAsker !== userId) {
-                    return socket.emit('error', { message: 'Not your turn to ask!' });
-                }
-
-                await R.cancelTimer(K.timerAskQuestion(gameId));
-                const translatedQuestion = await aiHelpers.translateToEnglish(question);
-
-                await R.setCurrentQuestion(gameId, {
-                    question, translatedQuestion, askedBy: userId, askedByTeam: session.currentTeam,
-                });
-
-                io.to(`game:${gameId}`).emit('game:questionAsked', {
-                    question, translatedQuestion, askedBy: userId, voiceUrl: voiceUrl || null,
-                });
-
-                aiHelpers.computeAIAnswer(translatedQuestion)
-                    .then(answer => R.setCorrectAnswer(gameId, answer))
-                    .catch(err => console.error('AI answer error:', err));
-
-                await R.startPinTimer(gameId);
-                io.to(`game:${gameId}`).emit('game:pinStarted', { translatedQuestion, duration: 10 });
-
-            } catch (err) {
-                console.error('askQuestion error:', err);
-                socket.emit('error', { message: 'Failed to process question' });
-            }
-        });
-
-        socket.on('game:raiseHand', async ({ gameId, userId }) => {
-            try {
-                const session = await R.getGameSession(gameId);
-                const question = await R.getCurrentQuestion(gameId);
-
-                if (question.status !== 'pinned') {
-                    return socket.emit('error', { message: 'Cannot raise hand now' });
-                }
-                if (question.askedByTeam === session.currentTeam) {
-                    return socket.emit('error', { message: "Your team asked — opponent team answers!" });
-                }
-
-                const raisedAt = await R.raiseHand(gameId, userId);
-                const allHands = await R.getAllRaisedHands(gameId);
-                io.to(`game:${gameId}`).emit('game:handRaised', { userId, raisedAt, allHands });
-
-            } catch (err) {
-                socket.emit('error', { message: 'Failed to raise hand' });
-            }
-        });
-
-        socket.on('game:lowerHand', async ({ gameId, userId }) => {
-            await R.lowerHand(gameId, userId);
-            const allHands = await R.getAllRaisedHands(gameId);
-            io.to(`game:${gameId}`).emit('game:handLowered', { userId, allHands });
-        });
-
-        socket.on('game:submitAnswer', async ({ gameId, userId, answer }) => {
-            try {
-                const session = await R.getGameSession(gameId);
-                const question = await R.getCurrentQuestion(gameId);
-
-                if (question.status === 'done') return;
-
-                await R.cancelTimer(K.timerAnswer(gameId));
-
-                const correctAnswer = question.correctAnswer;
-                const isCorrect = checkAnswerMatch(answer, correctAnswer);
-
-                if (isCorrect) {
-                    const opposingTeam = session.currentTeam === 'teamA' ? 'teamB' : 'teamA';
-                    const { playerScore, teamScore } = await R.awardPoint(gameId, userId, opposingTeam);
-
-                    await R.setQuestionAnswered(gameId, userId, answer, true);
-                    await R.clearRaisedHands(gameId);
-
-                    await R.addQuestionToHistory(gameId, {
-                        askedBy: question.askedBy,
-                        question: question.question,
-                        translatedQuestion: question.translatedQuestion,
-                        answeredBy: userId,
-                        answer,
-                        isCorrect: true,
-                    });
-
-                    io.to(`game:${gameId}`).emit('game:answerResult', {
-                        userId, answer, isCorrect: true, correctAnswer, playerScore, teamScore, scores: await R.getTeamScores(gameId),
-                    });
-
-                    await proceedToNextTurn(io, gameId);
-                } else {
-                    io.to(`game:${gameId}`).emit('game:answerResult', {
-                        userId, answer, isCorrect: false, correctAnswer, scores: await R.getTeamScores(gameId),
-                    });
-
-                    await R.setQuestionAnswered(gameId, userId, answer, false);
-                    await R.startAskerAnsTimer(gameId);
-                    io.to(`game:${gameId}`).emit('game:askerMustAnswer', { askerId: question.askedBy, duration: 15 });
-                }
-
-            } catch (err) {
-                console.error('submitAnswer error:', err);
-                socket.emit('error', { message: 'Failed to submit answer' });
-            }
-        });
-
-        socket.on('game:askerAnswer', async ({ gameId, userId, answer }) => {
-            try {
-                const question = await R.getCurrentQuestion(gameId);
-                if (question.askedBy !== userId) return;
-
-                await R.cancelTimer(K.timerAskerAnswer(gameId));
-
-                const correctAnswer = question.correctAnswer;
-                const isCorrect = checkAnswerMatch(answer, correctAnswer);
-
-                const session = await R.getGameSession(gameId);
-                if (isCorrect) {
-                    const { playerScore, teamScore } = await R.awardPoint(gameId, userId, session.currentTeam);
-
-                    io.to(`game:${gameId}`).emit('game:conditionAResult', {
-                        askerId: userId, answer, isCorrect: true, correctAnswer, playerScore, teamScore, scores: await R.getTeamScores(gameId),
-                    });
-                } else {
-                    io.to(`game:${gameId}`).emit('game:conditionAResult', {
-                        askerId: userId, answer, isCorrect: false, correctAnswer, scores: await R.getTeamScores(gameId),
-                    });
-                }
-
-                await R.clearRaisedHands(gameId);
-                await proceedToNextTurn(io, gameId);
-
-            } catch (err) {
-                console.error('askerAnswer error:', err);
-                socket.emit('error', { message: 'Failed to submit answer' });
-            }
-        });
-
-        socket.on('game:teamDiscussion', async ({ gameId, userId, selectedUserId }) => {
-            await R.clearRaisedHands(gameId);
-            io.to(`game:${gameId}`).emit('game:answererSelected', { userId: selectedUserId, selectedBy: userId });
-            await R.startAnswerTimer(gameId);
-            io.to(`game:${gameId}`).emit('game:answerTimer', { answererId: selectedUserId, duration: 15 });
-        });
-
-        socket.on('game:debatePoint', async ({ gameId, userId, point }) => {
-            const session = await R.getGameSession(gameId);
-            if (session.gameMode !== 'debate') return;
-
-            await R.addDebatePoint(gameId, {
-                userId, team: session.currentTeam, point, turnNumber: session.questionsAsked || 0, timestamp: Date.now(),
-            });
-
-            io.to(`game:${gameId}`).emit('game:debatePointAdded', { userId, point, team: session.currentTeam });
-            await proceedToNextTurn(io, gameId);
-        });
+});
         socket.on('disconnect', async () => {
              console.log(`❌ Socket disconnected: ${socket.id}`);
        const userId = socket.userId;
@@ -753,8 +588,7 @@ socket.on('chat:editMessage', async ({ teamId, messageId, content }) => {
              await R.removeFromQueue(
                memberId,
                queueEntry.topic,
-               queueEntry.questionCount,
-               queueEntry.gameMode
+               queueEntry.questionCount
              );
            }
            console.log(`🧹 Removed team ${queueEntry.teamId} from queue on disconnect`);
@@ -762,8 +596,7 @@ socket.on('chat:editMessage', async ({ teamId, messageId, content }) => {
            await R.removeFromQueue(
              userId,
              queueEntry.topic,
-             queueEntry.questionCount,
-             queueEntry.gameMode
+             queueEntry.questionCount
            );
          }
        }
@@ -775,7 +608,9 @@ socket.on('chat:editMessage', async ({ teamId, messageId, content }) => {
 socket.on('webrtc:offer', ({ offer, targetUserId, fromUserId, gameId }) => {
   io.to(`user:${targetUserId}`).emit('webrtc:offer', { offer, fromUserId });
 });
-
+socket.on('webrtc:videoToggle', ({ gameId, userId, videoEnabled }) => {
+  socket.to(`game:${gameId}`).emit('webrtc:videoToggle', { userId, videoEnabled });
+});
 socket.on('webrtc:answer', ({ answer, targetUserId, fromUserId }) => {
   io.to(`user:${targetUserId}`).emit('webrtc:answer', { answer, fromUserId });
 });
@@ -789,11 +624,11 @@ socket.on('webrtc:ice', ({ candidate, targetUserId, fromUserId }) => {
 // ═══════════════════════════════════════════════════════════════
 // NEW TRY MATCH WITH TEMP TEAM FORMATION
 // ══════════════════════════════════════════════════
-async function tryMatch(io, { topic, questionCount, gameMode }) {
+async function tryMatch(io, { topic, questionCount}) {
   try {
-    console.log(`🔍 Trying to match for ${topic}, ${questionCount} questions, ${gameMode} mode`);
+    console.log(`🔍 Trying to match for ${topic}, ${questionCount} questions`);
 
-    const allEntries = await R.getQueueEntries(topic, questionCount, gameMode);
+    const allEntries = await R.getQueueEntries(topic, questionCount);
 
     if (allEntries.length < 2) {
       console.log('Not enough players in queue');
@@ -872,8 +707,7 @@ async function tryMatch(io, { topic, questionCount, gameMode }) {
         // Level/class check
         if (!canMatch(e1, e2)) continue;
 
-        // Debate requires opposite stances
-        if (gameMode === 'debate' && e1.stance === e2.stance) continue;
+      
 
         // How many players each side has
         const e1Count = getPlayerCount(e1);
@@ -888,7 +722,7 @@ async function tryMatch(io, { topic, questionCount, gameMode }) {
      const e2Satisfied = !e2Wants || e1Count === e2Wants;
      if (e1Satisfied && e2Satisfied) {
      console.log(`✅ MATCH: ${e1.username}(has ${e1Count}, wants ${e1.opponentType}) vs ${e2.username}(has ${e2Count}, wants ${e2.opponentType})`);
-      await createMatch(io, e1, e2, gameMode);
+      await createMatch(io, e1, e2);
      return;
     }
     }
@@ -905,7 +739,7 @@ async function tryMatch(io, { topic, questionCount, gameMode }) {
 // CREATE MATCH FROM TWO ENTRIES
 // ═══════════════════════════════════════════════════════════════
 
-async function createMatch(io, entry1, entry2, gameMode) {
+async function createMatch(io, entry1, entry2) {
     const gameId = uuid();
     
     console.log('🎮 Creating match:', gameId);
@@ -952,33 +786,22 @@ async function createMatch(io, entry1, entry2, gameMode) {
         gameId,
         topic: entry1.topic,
         totalQuestions: entry1.questionCount,
-        gameMode,
         teamAMembers: teamAUserIds,
         teamBMembers: teamBUserIds,
         currentTeam: firstTeam,
         questionsAsked: 0,
         status: 'greet',
-        teamAScore: 0,
-        teamBScore: 0,
-        teamAStance: entry1.stance || null,
-        teamBStance: entry2.stance || null,
       });
 
-    await R.setTurnOrder(gameId, 'teamA', teamATurnOrder);
-    await R.setTurnOrder(gameId, 'teamB', teamBTurnOrder);
-    await R.getCurrentAsker(gameId, firstTeam === 'teamA' ? teamATurnOrder[0] : teamBTurnOrder[0]);
 
     // Emit to all players
     [...teamAUserIds, ...teamBUserIds].forEach(userId => {
   const isTeamA = teamAUserIds.includes(userId);
   io.to(`user:${userId}`).emit('match:found', {
     gameId,
-    gameMode,
     topic: entry1.topic,
     totalQuestions: entry1.questionCount,
     firstTeam,
-    teamAStance: entry1.stance || null,
-    teamBStance: entry2.stance || null,
     myTeamKey: isTeamA ? 'teamA' : 'teamB',
     myMembers: isTeamA ? teamAMembers : teamBMembers,       // ← full objects for display
     opponentMembers: isTeamA ? teamBMembers : teamAMembers, // ← full objects for display
@@ -986,8 +809,8 @@ async function createMatch(io, entry1, entry2, gameMode) {
  });
     // Remove from queue
   
-  await R.removeFromQueue(entry1.userId, entry1.topic, entry1.questionCount, entry1.gameMode);
-  await R.removeFromQueue(entry2.userId, entry2.topic, entry2.questionCount, entry2.gameMode);
+  await R.removeFromQueue(entry1.userId, entry1.topic, entry1.questionCount);
+  await R.removeFromQueue(entry2.userId, entry2.topic, entry2.questionCount);
 }
 
     async function startDiscussionGame(io, gameId, session) {
@@ -995,11 +818,10 @@ async function createMatch(io, entry1, entry2, gameMode) {
   await R.setGameStatus(gameId, 'greet');
   io.to(`game:${gameId}`).emit('game:greetPhase', { 
     duration: 30, 
-    gameId, 
-    gameMode: 'discussion' 
+    gameId
   });
   // While players greet — fetch question 1 in background
-  aiHelpers.generateDiscussionQuestion(session.topic, 1)
+  generateDiscussionQuestion(session.topic, 1)
     .then(question => R.setDiscussionQuestion(gameId, 1, question))
     .then(() => console.log(`✅ Q1 pre-fetched for game ${gameId}`))
     .catch(err => console.error('Pre-fetch Q1 error:', err.message));
@@ -1017,7 +839,7 @@ io.to(`game:${gameId}`).emit('game:discussionQuestion', {
   questionNumber: 1,
   totalQuestions: parseInt(session.totalQuestions),
       });
-   aiHelpers.generateDiscussionQuestion(session.topic, 2)
+   generateDiscussionQuestion(session.topic, 2)
   .then(q => R.setDiscussionQuestion(gameId, 2, q))
   .catch(err => console.error('Pre-fetch Q2 error:', err.message));
 
@@ -1026,182 +848,66 @@ io.to(`game:${gameId}`).emit('game:discussionQuestion', {
     }
   }, 30000);
  }
- 
-async function startGreetPhase(io, gameId, session) {
-  await R.setGameStatus(gameId, 'greet');
-  io.to(`game:${gameId}`).emit('game:greetPhase', { 
-    duration: 30, 
-    gameId, 
-    gameMode: session.gameMode 
-  });
-  // Timer expiry is handled by Redis keyspace notification
-  // handleTimerExpiry listens for ':timer:greet' key expiry
-  // which then emits game:started and starts the ask timer
-  await R.startGreetTimer(gameId);
+ async function endDiscussionGame(io, gameId) {
+  try {
+    const session = await R.getGameSession(gameId);
+    if (session) {
+      await saveDiscussionHistory(gameId, session); // ← save before deleting
+    }
+    await R.deleteGameSession(gameId);
+    await redis.del(`game:${gameId}:started`);
+    io.to(`game:${gameId}`).emit('game:ended', {
+      result: 'discussion_complete',
+      message: 'Discussion session ended!'
+    });
+    console.log(`🏁 Discussion game ${gameId} ended`);
+  } catch (err) {
+    console.error('endDiscussionGame error:', err);
+  }
 }
-async function endDiscussionGame(io, gameId) {
-  await R.deleteGameSession(gameId);
-  io.to(`game:${gameId}`).emit('game:ended', {
-    result: 'discussion_complete',
-    message: 'Discussion session ended!'
-  });
-  console.log(`🏁 Discussion game ${gameId} ended`);
-}
+async function saveDiscussionHistory(gameId, session) {
+  try {
+    const existing = await GameHistory.findOne({ gameId });
+    if (existing) return;
 
+    const teamAIds = session.teamAMembers.split(',').filter(Boolean);
+    const teamBIds = session.teamBMembers.split(',').filter(Boolean);
 
+    const buildPlayers = async (ids, team) => {
+      return await Promise.all(ids.map(async (userId) => {
+        const userData = await R.getUserOnlineData(userId);
+        return { userId, username: userData?.username || 'Unknown', team };
+      }));
+    };
 
-async function proceedToNextTurn(io, gameId) {
-    const { questionsAsked, totalQuestions } = await R.advanceTurn(gameId);
-    if (parseInt(questionsAsked) >= parseInt(totalQuestions)) {
-        await endGame(io, gameId);
-        return;
+    const teamAPlayers = await buildPlayers(teamAIds, 'teamA');
+    const teamBPlayers = await buildPlayers(teamBIds, 'teamB');
+
+    const questions = [];
+    const total = parseInt(session.currentQuestionNumber || session.totalQuestions || 1);
+    for (let i = 1; i <= total; i++) {
+      const text = await R.getDiscussionQuestion(gameId, i);
+      if (text) questions.push({ number: i, text });
     }
 
-    const nextAsker = await R.getCurrentAsker(gameId);
-    const session = await R.getGameSession(gameId);
+    // ← Fetch ratings from Redis
+    const ratings = await R.getGameRatings(gameId);
 
-    io.to(`game:${gameId}`).emit('game:nextTurn', { nextAsker, currentTeam: session.currentTeam, questionsAsked, totalQuestions });
-    await R.startAskTimer(gameId);
-    io.to(`game:${gameId}`).emit('game:askTimer', { askerId: nextAsker, duration: 15 });
-}
-
-async function endGame(io, gameId) {
-    const scores = await R.getTeamScores(gameId);
-    const playerScores = await R.getPlayerScores(gameId);
-    const session = await R.getGameSession(gameId);
-
-    if (session.gameMode === 'debate') {
-        const debatePoints = await R.getDebatePoints(gameId);
-        const teamAArgs = debatePoints.filter(p => p.team === 'teamA').map(p => p.point);
-        const teamBArgs = debatePoints.filter(p => p.team === 'teamB').map(p => p.point);
-
-        const judgment = await aiHelpers.judgeDebate(session.topic, session.teamAStance, session.teamBStance, teamAArgs, teamBArgs);
-        await R.setTeamScore(gameId, 'teamA', judgment.scores.teamA);
-        await R.setTeamScore(gameId, 'teamB', judgment.scores.teamB);
-
-        io.to(`game:${gameId}`).emit('game:debateJudgment', {
-            winner: judgment.winner, reasoning: judgment.reasoning, scores: judgment.scores,
-        });
-    }
-
-    const teamAScore = parseInt(scores.teamA || 0);
-    const teamBScore = parseInt(scores.teamB || 0);
-
-    const teamAMembers = session.teamAMembers ? session.teamAMembers.split(',') : [];
-    const teamBMembers = session.teamBMembers ? session.teamBMembers.split(',') : [];
-
-    let result;
-    if (teamAScore > teamBScore) result = 'teamA';
-    else if (teamBScore > teamAScore) result = 'teamB';
-    else result = 'draw';
-
-    let mvp = null, mvpScore = -1;
-    Object.entries(playerScores).forEach(([uid, score]) => {
-        if (parseInt(score) > mvpScore) { mvpScore = parseInt(score); mvp = uid; }
+    await GameHistory.create({
+      gameId,
+      topic: session.topic,
+      players: [...teamAPlayers, ...teamBPlayers],
+      questions,
+      ratings,           // ← save ratings array to MongoDB
+      totalQuestions: questions.length,
+      playedAt: new Date(),
     });
 
-    await R.endGameSession(gameId);
-    io.to(`game:${gameId}`).emit('game:ended', { result, teamAScore, teamBScore, playerScores, mvp, session });
+    // Clean up Redis ratings after saving
+    await R.deleteGameRatings(gameId);
 
-    const allPlayers = [...teamAMembers, ...teamBMembers];
-    await Promise.all(allPlayers.map(userId => User.findByIdAndUpdate(userId, { currentTeam: null })));
-    await saveCompletedGame(gameId);
-}
-
-async function handlePlayerLeave(io, socket, gameId, userId) {
-    socket.leave(`game:${gameId}`);
-    await R.removePlayerFromGame(gameId, userId);
-    await R.setUserOffline(userId);
-    await User.findByIdAndUpdate(userId, { currentTeam: null });
-    io.to(`game:${gameId}`).emit('game:playerLeft', { userId });
-
-    const isEmpty = await R.isGameEmpty(gameId);
-    if (isEmpty) {
-        await R.deleteGameSession(gameId);
-        console.log(`🗑️ Game ${gameId} cleaned up from Redis`);
-    }
-}
-
-async function handleTimerExpiry(io, expiredKey) {
-    try {
-      if (expiredKey.includes(':timer:greet')) {
-  const gameId = expiredKey.split(':')[1];
-  const session = await R.getGameSession(gameId);
-  if (!session) return;
-
-  // Discussion greet is handled by startDiscussionGame's setTimeout — not here
-  if (session.gameMode === 'discussion') return; // ← add this
-
-  await R.updateGameSession(gameId, { status: 'active' });
-  const nextAsker = await R.getCurrentAsker(gameId);
-  io.to(`game:${gameId}`).emit('game:started', { 
-    message: 'Game begins!', firstAsker: nextAsker, currentTeam: session.currentTeam 
-  });
-  await R.startAskTimer(gameId);
-  io.to(`game:${gameId}`).emit('game:askTimer', { askerId: nextAsker, duration: 15 });
-}
-        else if (expiredKey.includes(':timer:ask')) {
-            const gameId = expiredKey.split(':')[1];
-            io.to(`game:${gameId}`).emit('game:askTimerExpired', { message: 'Question skipped!' });
-            await proceedToNextTurn(io, gameId);
-        }
-        else if (expiredKey.includes(':timer:pin')) {
-            const gameId = expiredKey.split(':')[1];
-            const hands = await R.getAllRaisedHands(gameId);
-
-            if (!hands.length) {
-                const question = await R.getCurrentQuestion(gameId);
-                io.to(`game:${gameId}`).emit('game:noHandsRaised', { askerId: question.askedBy });
-                await R.startAskerAnsTimer(gameId);
-                io.to(`game:${gameId}`).emit('game:askerMustAnswer', { askerId: question.askedBy, duration: 15 });
-            } else if (hands.length === 2) {
-                const selectedUserId = hands[0];
-                io.to(`game:${gameId}`).emit('game:answererSelected', { userId: selectedUserId });
-                await R.startAnswerTimer(gameId);
-                io.to(`game:${gameId}`).emit('game:answerTimer', { answererId: selectedUserId, duration: 15 });
-            } else {
-                const firstTime = hands[1];
-                const sameTimeHands = [];
-                for (let i = 0; i < hands.length; i += 2) {
-                    if (hands[i + 1] === firstTime) sameTimeHands.push(hands[i]);
-                }
-                if (sameTimeHands.length > 1) {
-                    io.to(`game:${gameId}`).emit('game:handTie', { tiedUsers: sameTimeHands, duration: 10 });
-                    await R.startDiscussTimer(gameId);
-                } else {
-                    const selectedUserId = hands[0];
-                    io.to(`game:${gameId}`).emit('game:answererSelected', { userId: selectedUserId });
-                    await R.startAnswerTimer(gameId);
-                    io.to(`game:${gameId}`).emit('game:answerTimer', { answererId: selectedUserId, duration: 15 });
-                }
-            }
-        }
-        else if (expiredKey.includes(':timer:answer')) {
-            const gameId = expiredKey.split(':')[1];
-            const question = await R.getCurrentQuestion(gameId);
-            io.to(`game:${gameId}`).emit('game:answerTimerExpired');
-            await R.startAskerAnsTimer(gameId);
-            io.to(`game:${gameId}`).emit('game:askerMustAnswer', { askerId: question.askedBy, duration: 15 });
-        }
-        else if (expiredKey.includes(':timer:askerAns')) {
-            const gameId = expiredKey.split(':')[1];
-            io.to(`game:${gameId}`).emit('game:conditionAResult', {
-                isCorrect: false, timedOut: true, scores: await R.getTeamScores(gameId),
-            });
-            await R.clearRaisedHands(gameId);
-            await proceedToNextTurn(io, gameId);
-        }
-        else if (expiredKey.includes(':timer:discuss')) {
-            const gameId = expiredKey.split(':')[1];
-            const hands = await R.getAllRaisedHands(gameId);
-            if (!hands.length) { await proceedToNextTurn(io, gameId); return; }
-            const userIds = hands.filter((_, i) => i % 2 === 0);
-            const randomUserId = userIds[Math.floor(Math.random() * userIds.length)];
-            io.to(`game:${gameId}`).emit('game:answererSelected', { userId: randomUserId, wasRandom: true });
-            await R.startAnswerTimer(gameId);
-            io.to(`game:${gameId}`).emit('game:answerTimer', { answererId: randomUserId, duration: 15 });
-        }
-    } catch (err) {
-        console.error('Timer expiry error:', err);
-    }
+    console.log(`📝 Game history saved for ${gameId} with ${ratings.length} ratings`);
+  } catch (err) {
+    console.error('saveDiscussionHistory error:', err.message);
+  }
 }

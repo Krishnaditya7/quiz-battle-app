@@ -12,7 +12,6 @@ import matchRoutes from './routes/Matchroutes.js';
 import gameRoutes from './routes/Gameroutes.js';
 import friendRoutes from './routes/Friendroutes.js';
 import leaderboardRoutes from './routes/leaderboardRoutes.js';
-import { translateToEnglish, computeAIAnswer, generateDiscussionQuestion, judgeDebate } from './utils/aiHelpers.js';
  import { createTeamRoutes } from './routes/teamRoutes.js';
 import Notificationroutes from './routes/Notificationroutes.js';
 import userRoutes from './routes/userRoutes.js'
@@ -47,39 +46,8 @@ app.use('/api/game', gameRoutes);
 app.use('/api/friend', friendRoutes);
 app.use('/api/leaderboard', leaderboardRoutes);
 app.use('/api/user',userRoutes);
-app.post('/test/translate', async (req, res) => {
-  try {
-    const result = await translateToEnglish(req.body.text);
-    res.json({ original: req.body.text, translated: result });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/test/answer', async (req, res) => {
-  try {
-    const result = await computeAIAnswer(req.body.question);
-    res.json({ question: req.body.question, answer: result });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
 
-app.post('/test/debate', async (req, res) => {
-  try {
-    const result = await judgeDebate(
-      'Deforestation',
-      'for',
-      'against',
-      ['Creates jobs', 'Economic growth'],
-      ['Destroys ecosystems', 'Climate change']
-    );
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
 // ── Health check ──
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));

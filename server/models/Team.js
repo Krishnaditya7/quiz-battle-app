@@ -48,18 +48,6 @@ const teamSchema = new mongoose.Schema({
     type: Number,
     default: 1,
   },
-  totalWon: {
-    type: Number,
-    default: 0,
-  },
-  totalLoss: {
-    type: Number,
-    default: 0,
-  },
-  draws: {
-    type: Number,
-    default: 0,
-  },
 }, { timestamps: true });
 
 // ── Virtual: is team full? ──

@@ -307,7 +307,7 @@ export const approveJoinRequest = async (req, res, io) => {
     });
 
     if (io) {
-      io.to(`user:${userIdToApprove}`).emit('notification:new', { notification });
+      io.to(`user:${userIdToApprove}`).emit('notification:new', { Notification });
     }
 
     return res.status(200).json({ success: true, message: 'Approved!', team });

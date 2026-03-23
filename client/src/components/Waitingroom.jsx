@@ -77,8 +77,7 @@ useEffect(() => {
     socket.emit('queue:leave', {
       userId: user._id,
       topic: queueData.topic,
-      questionCount: queueData.questionCount,
-      gameMode: queueData.gameMode,
+      questionCount: queueData.questionCount
     });
 
     navigate('/game');
@@ -149,7 +148,7 @@ useEffect(() => {
                 <div className={`text-8xl font-black ${
                   matchFound ? 'text-green-400 scale-125' : 'text-purple-400'
                 } transition-all duration-500`}>
-                  {queueData?.gameMode === 'discussion' ? 'WITH' : 'VS'}
+                 WITH
                 </div>
                 
                 {!matchFound && (
@@ -170,7 +169,7 @@ useEffect(() => {
                 <div className="text-sm text-slate-400 mb-2">Topic</div>
                 <div className="text-2xl font-black text-purple-300">{queueData?.topic}</div>
                 <div className="text-sm text-slate-400 mt-2">
-                  {queueData?.gameMode?.toUpperCase()} • {queueData?.questionCount} Questions
+                   {queueData?.questionCount} Questions
                 </div>
               </div>
             </div>

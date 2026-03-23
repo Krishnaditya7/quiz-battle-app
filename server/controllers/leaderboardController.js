@@ -19,11 +19,10 @@ export const getLeaderboard = async (req, res) => {
 
     // Not in cache - calculate from MongoDB
     const leaderboard = await User.find()
-      .select('username level xp stats.wins stats.gamesPlayed createdAt bio profilePic')
+      .select('username level xp  stats.gamesPlayed createdAt bio profilePic')
       .sort({
         level: -1,           // 1st: Highest level
         xp: -1,              // 2nd: Highest XP (if level tied)
-        'stats.wins': -1,    // 3rd: Most wins (if XP tied)
         createdAt: 1         // 4th: Earliest join (if wins tied)
       })
       .limit(100)

@@ -19,74 +19,56 @@ function App() {
   const [loading, setLoading] = useState(true);
   const socketRef = useRef(null);
   const [socket, setSocket] = useState(null);
-  useEffect(() => {
-    const checkAuth = async () => {
-      console.log('checkAuth started');
-      try {
-        const res = await axios.get(
-          "http://localhost:5000/api/auth/me",
-          { withCredentials: true,
-            headers: {
-      'Cache-Control': 'no-cache'
-           }
-          }
-        );
-            console.log('response status:', res.status);
-            console.log('response data:', res.data);
-        if (res.data.success) {
-          const userData = res.data.user;
-          console.log('setting user:', res.data.user.username);
-          setUser(userData);
-          localStorage.setItem('user', JSON.stringify(userData));
 
-          // Connect socket once and mark user online
-       if (!socketRef.current) {
-         socketRef.current = io('http://localhost:5000', {
-           withCredentials: true,
-           transports: ['websocket', 'polling']
-         });
-       
-         socketRef.current.on('connect', () => {
-           console.log('🔌 Socket connected:', socketRef.current.id);
-           socketRef.current.emit('user:online', {
-             userId: userData._id,
-             username: userData.username,
-             level: userData.level ?? 1,
-           });
-           setSocket(socketRef.current); // ← add this, triggers re-render with socket ready
-         });
-          }
+    useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const res = await axios.get("http://localhost:5000/api/auth/me", {
+          withCredentials: true,
+          headers: { 'Cache-Control': 'no-cache' }
+        });
+        if (res.data.success) {
+          setUser(res.data.user);
+          localStorage.setItem('user', JSON.stringify(res.data.user));
         }
-        else {
-      console.log('success was false or user missing');
-    }
-  } catch (err) {
-        console.log('Error type:', err.constructor.name);
-        console.log('Error message:', err.message);
-        console.log('Has response:', !!err.response);
-        console.log('Response status:', err.response?.status);
+      } catch (err) {
         setUser(null);
         localStorage.removeItem('user');
       } finally {
         setLoading(false);
       }
     };
-
     checkAuth();
-   console.log('App user state:', user);
-    // When user closes tab or browser → socket disconnects → backend marks offline
-
-    return () => {
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-        socketRef.current = null;
-      }
-    };
   }, []);
 
- useEffect(() => {
-  console.log('user state changed:', user);
-}, [user]);
+  // 2. Create socket whenever user becomes available
+  useEffect(() => {
+    if (!user || socketRef.current) return;
+
+    socketRef.current = io('http://localhost:5000', {
+      withCredentials: true,
+      transports: ['websocket', 'polling']
+    });
+
+    socketRef.current.on('connect', () => {
+      console.log('🔌 Socket connected:', socketRef.current.id);
+      socketRef.current.emit('user:online', {
+        userId: user._id,
+        username: user.username,
+        level: user.level ?? 1,
+      });
+      setSocket(socketRef.current);
+    });
+
+    socketRef.current.on('connect_error', (err) => {
+      console.error('Socket error:', err.message);
+    });
+
+    return () => {
+      socketRef.current?.disconnect();
+      socketRef.current = null;
+    };
+  }, [user]);
 
   if (loading) {
     return (

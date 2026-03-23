@@ -3,14 +3,53 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 // ── OUTSIDE GameRoom function — at the top of the file ──
 // ── OUTSIDE GameRoom function — at the top of the file ──
+const StarRating = ({ playerId, questionNumber, question, existingRating, onRate }) => {
+  const [hovered, setHovered] = useState(0);
+  const rated = existingRating != null;
+
+  return (
+    <div className="mt-2 px-2 py-1.5 bg-slate-800/80 border border-white/5 rounded-xl">
+      <p className="text-[9px] text-slate-400 mb-1 leading-tight">Rate based on this discussion</p>
+      <div className="flex gap-0.5 justify-center">
+        {[1,2,3,4,5].map(star => (
+          <button
+            key={star}
+            disabled={rated}
+            onMouseEnter={() => !rated && setHovered(star)}
+            onMouseLeave={() => !rated && setHovered(0)}
+            onClick={() => !rated && onRate(playerId, star, questionNumber, question)}
+            className={`text-base transition-transform ${!rated ? 'hover:scale-125 cursor-pointer' : 'cursor-default'}`}
+          >
+            <span className={
+              star <= (hovered || existingRating || 0)
+                ? 'text-amber-400'
+                : 'text-slate-600'
+            }>★</span>
+          </button>
+        ))}
+      </div>
+      {rated && (
+        <p className="text-[9px] text-emerald-400 text-center mt-0.5">Rated ✓</p>
+      )}
+    </div>
+  );
+};
+
 const PlayerTile = React.memo(({ 
   player, isMe, isMine, 
   videoEnabled, voiceEnabled,
-  localVideoRef, remoteStreams,
+  localVideoRef, remoteStreams, remoteVideoStates,
   speakingRingRefs, playersInGame,
   onAddFriend, onReport, onShowProfile,
+  // rating props
+  showRating, currentQuestion, questionNumber, ratings, onRate,
 }) => {
   const stream = isMe ? null : remoteStreams?.[player.userId];
+  // ✅ Fix: check if remote video track is actually active (not just stream exists)
+  const hasActiveVideo = stream && stream.getVideoTracks().some(
+    t => t.enabled && t.readyState === 'live'
+  ) && remoteVideoStates?.[player.userId] !== false;
+
   const isOnline = isMe || playersInGame.includes(player.userId);
   const remoteVideoRef = useRef(null);
 
@@ -20,12 +59,21 @@ const PlayerTile = React.memo(({
     }
   }, [stream]);
 
+  // ✅ Fix: when video goes inactive, clear srcObject so no frozen frame
+  useEffect(() => {
+    if (!hasActiveVideo && remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = null;
+    }
+  }, [hasActiveVideo]);
+
+  const existingRating = ratings?.[`${player.userId}_${questionNumber}`];
+
   return (
     <div
       className="relative group cursor-pointer transition-all duration-300"
       onClick={() => !isMe && onShowProfile(player)}
     >
-      {/* Speaking ring — opacity controlled via ref, no React state */}
+      {/* Speaking ring */}
       <div
         ref={el => { if (el && speakingRingRefs?.current) speakingRingRefs.current[player.userId] = el; }}
         className="absolute inset-0 rounded-2xl ring-2 ring-emerald-400 ring-offset-2 z-10 pointer-events-none transition-opacity duration-100"
@@ -44,13 +92,15 @@ const PlayerTile = React.memo(({
               className="w-full h-full object-cover"
               style={{ transform: 'scaleX(-1)' }}
             />
-          ) : stream ? (
+          ) : !isMe && hasActiveVideo ? (
+            // ✅ Fix: only show video element when track is actually live
             <video
               ref={remoteVideoRef}
               autoPlay playsInline
               className="w-full h-full object-cover"
             />
           ) : (
+            // ✅ Fix: always fall back to avatar — no frozen frames
             <div className={`w-full h-full flex items-center justify-center text-4xl ${
               isMine
                 ? 'bg-gradient-to-br from-violet-800/50 to-purple-900/50'
@@ -66,7 +116,7 @@ const PlayerTile = React.memo(({
             </div>
           )}
 
-          {/* Waveform — also ref controlled */}
+          {/* Waveform */}
           <div
             ref={el => { if (el && speakingRingRefs?.current) speakingRingRefs.current[`wave_${player.userId}`] = el; }}
             className="absolute bottom-2 left-2 flex gap-0.5 items-end transition-opacity duration-100"
@@ -84,6 +134,10 @@ const PlayerTile = React.memo(({
             )}
             {isMe && !videoEnabled && (
               <div className="w-5 h-5 bg-red-600/90 rounded-full flex items-center justify-center text-xs">📵</div>
+            )}
+            {/* Show video-off badge for remote player */}
+            {!isMe && remoteVideoStates?.[player.userId] === false && (
+              <div className="w-5 h-5 bg-slate-700/90 rounded-full flex items-center justify-center text-xs">📵</div>
             )}
           </div>
         </div>
@@ -108,16 +162,32 @@ const PlayerTile = React.memo(({
             </div>
           )}
         </div>
+
+        {/* ✅ Rating widget — only for opponents, only when a question is active */}
+        {!isMe && showRating && currentQuestion && (
+          <div onClick={e => e.stopPropagation()}>
+            <StarRating
+              playerId={player.userId}
+              questionNumber={questionNumber}
+              question={currentQuestion}
+              existingRating={existingRating}
+              onRate={onRate}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
 }, (prev, next) => {
-  // Only re-render when these props actually change
   return (
     prev.videoEnabled === next.videoEnabled &&
     prev.voiceEnabled === next.voiceEnabled &&
     prev.remoteStreams?.[prev.player.userId] === next.remoteStreams?.[next.player.userId] &&
-    prev.playersInGame === next.playersInGame
+    prev.remoteVideoStates?.[prev.player.userId] === next.remoteVideoStates?.[next.player.userId] &&
+    prev.playersInGame === next.playersInGame &&
+    prev.showRating === next.showRating &&
+    prev.questionNumber === next.questionNumber &&
+    prev.ratings?.[`${prev.player.userId}_${prev.questionNumber}`] === next.ratings?.[`${next.player.userId}_${next.questionNumber}`]
   );
 });
 export default function GameRoom({ socket, user }) {
@@ -146,8 +216,13 @@ export default function GameRoom({ socket, user }) {
   const peerConnectionsRef = useRef({});
   const localVideoRef = useRef(null);
   const [remoteStreams, setRemoteStreams] = useState({});
+  const [remoteVideoStates, setRemoteVideoStates] = useState({}); // ✅ tracks if remote video is on/off
   const [videoEnabled, setVideoEnabled] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(false);
+
+  // ── Rating state ──
+  // { "userId_questionNumber": starValue }
+  const [ratings, setRatings] = useState({});
   
   const speakingRingRefs = useRef({});
   const audioContextsRef = useRef({});
@@ -307,10 +382,22 @@ const startSpeakingDetection = useCallback((stream, userId) => {
         setVoiceEnabled(true);
         const others = allPlayers.filter(p => p.userId !== user._id).map(p => p.userId);
         for (const id of others) await callPeer(id);
+        // ✅ Tell others video is ON
+        socket?.emit('webrtc:videoToggle', {
+          gameId: gameData?.gameId,
+          userId: user._id,
+          videoEnabled: true,
+        });
       } else {
         localStreamRef.current?.getVideoTracks().forEach(t => { t.stop(); t.enabled = false; });
         if (localVideoRef.current) localVideoRef.current.srcObject = null;
         setVideoEnabled(false);
+        // ✅ Tell others video is OFF
+        socket?.emit('webrtc:videoToggle', {
+          gameId: gameData?.gameId,
+          userId: user._id,
+          videoEnabled: false,
+        });
       }
     } catch (e) { console.error('toggleVideo error:', e); }
   };
@@ -342,16 +429,6 @@ const startSpeakingDetection = useCallback((stream, userId) => {
       if (localStreamRef.current && userId !== user._id) callPeer(userId);
     });
 
-    socket.on('game:greetPhase', ({ duration }) => {
-      setGreetPhase(true);
-      setGreetTimer(duration);
-      let t = duration;
-      const iv = setInterval(() => {
-        t--;
-        setGreetTimer(t);
-        if (t <= 0) { clearInterval(iv); setGreetPhase(false); }
-      }, 1000);
-    });
 
     socket.on('game:discussionQuestion', ({ question, questionNumber, totalQuestions }) => {
       setCurrentQuestion(question);
@@ -412,9 +489,21 @@ const startSpeakingDetection = useCallback((stream, userId) => {
       }
     });
 
+    // ✅ Fix: listen for remote video toggle → update remoteVideoStates
+    socket.on('webrtc:videoToggle', ({ userId, videoEnabled: isOn }) => {
+      setRemoteVideoStates(prev => ({ ...prev, [userId]: isOn }));
+      // Also disable the video track in the existing stream
+      setRemoteStreams(prev => {
+        const stream = prev[userId];
+        if (stream) {
+          stream.getVideoTracks().forEach(t => { t.enabled = isOn; });
+        }
+        return { ...prev };
+      });
+    });
+
     return () => {
       socket.off('game:playerJoined');
-      socket.off('game:greetPhase');
       socket.off('game:discussionQuestion');
       socket.off('game:nextQuestionVote');
       socket.off('game:playerLeft');
@@ -423,8 +512,25 @@ const startSpeakingDetection = useCallback((stream, userId) => {
       socket.off('webrtc:offer');
       socket.off('webrtc:answer');
       socket.off('webrtc:ice');
+      socket.off('webrtc:videoToggle'); // ✅
     };
   }, [socket, gameData, user, callPeer, createPeerConnection, chatOpen]);
+
+  useEffect(() => {
+    socket.on('game:greetPhase', ({ duration }) => {
+  setGreetPhase(true);
+  setGreetTimer(duration);
+  let t = duration;
+  const iv = setInterval(() => {
+    t--;
+    setGreetTimer(t);
+    if (t <= 0) { clearInterval(iv); setGreetPhase(false); }
+  }, 1000);
+});
+return ()=> {
+  socket.off('game:greetPhase');
+};
+  }, []);
 useEffect(() => {
   if (videoEnabled && localVideoRef.current && localStreamRef.current) {
     localVideoRef.current.srcObject = localStreamRef.current;
@@ -483,6 +589,26 @@ useEffect(() => {
   const handleReport = (targetUserId) => {
     notify('Report submitted', 'success');
     // TODO: implement report endpoint
+  };
+
+  // ── Rating handler ──
+  const handleRate = (ratedUserId, stars, qNumber, question) => {
+    const key = `${ratedUserId}_${qNumber}`;
+    if (ratings[key] != null) return; // already rated
+
+    setRatings(prev => ({ ...prev, [key]: stars }));
+
+    // Emit to server — stored in Redis, flushed to MongoDB on game end
+    socket?.emit('game:ratePlayer', {
+      gameId: gameData?.gameId,
+      raterUserId: user._id,
+      ratedUserId,
+      stars,
+      questionNumber: qNumber,
+      question,
+    });
+
+    notify(`Rated ★${stars}`, 'success');
   };
 
   const myUserId = user?._id;
@@ -614,12 +740,14 @@ useEffect(() => {
              voiceEnabled={voiceEnabled}
              localVideoRef={localVideoRef}
              remoteStreams={remoteStreams}
+             remoteVideoStates={remoteVideoStates}
              speakingRingRefs={speakingRingRefs}
              playersInGame={playersInGame}
              onAddFriend={handleAddFriend}
              onReport={handleReport}
              onShowProfile={setShowPlayerModal}
              myUserId={myUserId}
+             showRating={false}
             />
           ))}
         </div>
@@ -723,12 +851,18 @@ useEffect(() => {
               voiceEnabled={voiceEnabled}
               localVideoRef={localVideoRef}
               remoteStreams={remoteStreams}
+              remoteVideoStates={remoteVideoStates}
               speakingRingRefs={speakingRingRefs}
               playersInGame={playersInGame}
               onAddFriend={handleAddFriend}
               onReport={handleReport}
               onShowProfile={setShowPlayerModal}
               myUserId={myUserId}
+              showRating={!!currentQuestion}
+              currentQuestion={currentQuestion}
+              questionNumber={questionNumber}
+              ratings={ratings}
+              onRate={handleRate}
             />
           ))}
         </div>
