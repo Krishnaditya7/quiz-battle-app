@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from "react-router-dom";
+import { BACKEND_URL } from '../config';
 
 export default function AuthPage({ setUser }) {
   const navigate = useNavigate();
@@ -104,11 +105,11 @@ export default function AuthPage({ setUser }) {
         ? { emailOrUsername: formData.email, password: formData.password }
         : formData;
 
-      await axios.post(`http://localhost:5000${endpoint}`, payload, {
+      await axios.post(`${BACKEND_URL}${endpoint}`, payload, {
         withCredentials: true
       });
      const profileRes = await axios.get(
-      "http://localhost:5000/api/auth/me",
+      `${BACKEND_URL}/api/auth/me`,
       { withCredentials: true }
     );
 

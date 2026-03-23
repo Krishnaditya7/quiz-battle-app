@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import Lenis from '@studio-freight/lenis';
+import { BACKEND_URL } from '../config';
 
 export default function HomePage({ user: propUser }) {
   useEffect(() => {
@@ -52,7 +53,7 @@ export default function HomePage({ user: propUser }) {
     const fetchUnreadCount = async () => {
       try {
         const res = await axios.get(
-          'http://localhost:5000/api/notification/unread-count',
+          `${BACKEND_URL}/api/notification/unread-count`,
           { withCredentials: true }
         );
         if (res.data.success) setUnreadCount(res.data.unreadCount);
@@ -92,7 +93,7 @@ export default function HomePage({ user: propUser }) {
 
   const fetchTop3 = async () => {
     try {
-      const res = await axios.get('http://localhost:5000/api/leaderboard/top3');
+      const res = await axios.get(`${BACKEND_URL}/api/leaderboard/top3`);
       if (res.data.success) setTopUsers(res.data.top3);
     } catch (err) {
       console.error('Failed to fetch top 3:', err);
@@ -103,7 +104,7 @@ export default function HomePage({ user: propUser }) {
   const handleUpdateBio = async (userId) => {
     try {
       const res = await axios.patch(
-        'http://localhost:5000/api/leaderboard/bio',
+        `${BACKEND_URL}/api/leaderboard/bio`,
         { bio: newBio },
         { withCredentials: true }
       );

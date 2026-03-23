@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import axios from "axios";
 import { io } from "socket.io-client";
 import SocketListener from "./components/SocketListener";
+import { BACKEND_URL } from "./config";
 
 import HomePage from "./components/HomePage";
 import AuthPage from "./components/AuthPage";
@@ -23,7 +24,7 @@ function App() {
     useEffect(() => {
     const checkAuth = async () => {
       try {
-        const res = await axios.get("http://localhost:5000/api/auth/me", {
+        const res = await axios.get(`${BACKEND_URL}/api/auth/me`, {
           withCredentials: true,
           headers: { 'Cache-Control': 'no-cache' }
         });
@@ -45,7 +46,7 @@ function App() {
   useEffect(() => {
     if (!user || socketRef.current) return;
 
-    socketRef.current = io('http://localhost:5000', {
+    socketRef.current = io(`${BACKEND_URL}`, {
       withCredentials: true,
       transports: ['websocket', 'polling']
     });

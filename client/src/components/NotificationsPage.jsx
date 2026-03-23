@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { BACKEND_URL } from '../config';
 
 export default function NotificationPage({ socket, user }) {
   const navigate = useNavigate();
@@ -25,7 +26,7 @@ export default function NotificationPage({ socket, user }) {
   const fetchNotifications = async () => {
     try {
       const res = await axios.get(
-        'http://localhost:5000/api/notification',
+        `${BACKEND_URL}/api/notification`,
         { withCredentials: true }
       );
       if (res.data.success) {
@@ -41,7 +42,7 @@ export default function NotificationPage({ socket, user }) {
   const handleAcceptInvite = async (notification) => {
     try {
       await axios.post(
-        `http://localhost:5000/api/team/${notification.team._id}/accept-invite`,
+        `${BACKEND_URL}/api/team/${notification.team._id}/accept-invite`,
         {},
         { withCredentials: true }
       );
@@ -55,7 +56,7 @@ export default function NotificationPage({ socket, user }) {
   const handleRejectInvite = async (notification) => {
     try {
       await axios.post(
-        `http://localhost:5000/api/team/${notification.team._id}/reject-invite`,
+        `${BACKEND_URL}/api/team/${notification.team._id}/reject-invite`,
         {},
         { withCredentials: true }
       );
@@ -68,7 +69,7 @@ export default function NotificationPage({ socket, user }) {
   const handleApproveJoinRequest = async (notification) => {
     try {
       await axios.post(
-        `http://localhost:5000/api/team/${notification.team._id}/approve-join`,
+        `${BACKEND_URL}/api/team/${notification.team._id}/approve-join`,
         { userIdToApprove: notification.sender._id },
         { withCredentials: true }
       );
@@ -82,7 +83,7 @@ export default function NotificationPage({ socket, user }) {
   const handleMarkAllRead = async () => {
     try {
       await axios.patch(
-        'http://localhost:5000/api/notification/mark-all-read',
+        `${BACKEND_URL}/api/notification/mark-all-read`,
         {},
         { withCredentials: true }
       );
@@ -95,7 +96,7 @@ export default function NotificationPage({ socket, user }) {
   const handleDelete = async (notificationId) => {
     try {
       await axios.delete(
-        `http://localhost:5000/api/notification/${notificationId}`,
+        `${BACKEND_URL}/api/notification/${notificationId}`,
         { withCredentials: true }
       );
       setNotifications(prev => prev.filter(n => n._id !== notificationId));

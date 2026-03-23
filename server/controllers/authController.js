@@ -27,7 +27,7 @@ secure: true
 
 Backend:
 
-localhost:5000*/
+${BACKEND_URL}*/
 };
 export const SignUp = async (req, res) => {
   try {

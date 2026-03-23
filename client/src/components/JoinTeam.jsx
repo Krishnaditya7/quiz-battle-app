@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-
+import { BACKEND_URL } from '../config';
 export default function JoinTeamsModal({ show, onClose }) {
   const [searchTopic, setSearchTopic] = useState('');
   const [availableTeams, setAvailableTeams] = useState([]);
@@ -17,8 +17,8 @@ export default function JoinTeamsModal({ show, onClose }) {
     setLoading(true);
     try {
       const url = searchTopic 
-        ? `http://localhost:5000/api/team/browse?topic=${searchTopic}`
-        : `http://localhost:5000/api/team/browse`;
+        ? `${BACKEND_URL}/api/team/browse?topic=${searchTopic}`
+        : `${BACKEND_URL}/api/team/browse`;
       
       const res = await axios.get(url, { withCredentials: true });
       setAvailableTeams(res.data.teams || []);
@@ -32,7 +32,7 @@ export default function JoinTeamsModal({ show, onClose }) {
   const handleJoinRequest = async (teamId) => {
     try {
       const res = await axios.post(
-        `http://localhost:5000/api/team/${teamId}/join-request`,
+        `${BACKEND_URL}/api/team/${teamId}/join-request`,
         {},
         { withCredentials: true }
       );

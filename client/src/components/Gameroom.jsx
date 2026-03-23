@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
+import { BACKEND_URL } from '../config';
 // ── OUTSIDE GameRoom function — at the top of the file ──
 // ── OUTSIDE GameRoom function — at the top of the file ──
 const StarRating = ({ playerId, questionNumber, question, existingRating, onRate }) => {
@@ -578,7 +579,7 @@ useEffect(() => {
 
   const handleAddFriend = async (targetUserId) => {
     try {
-      await axios.post(`http://localhost:5000/api/friend/request`,
+      await axios.post(`${BACKEND_URL}/api/friend/request`,
         { recipientId: targetUserId }, { withCredentials: true });
       notify('Friend request sent!', 'success');
     } catch (e) {

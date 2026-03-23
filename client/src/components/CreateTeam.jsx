@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { BACKEND_URL } from '../config';
 
 export default function TeamManagementModal({ show, onClose, socket, user}) {
   const [myTeams, setMyTeams] = useState([]);
@@ -86,7 +87,7 @@ useEffect(() => {
 
   // Mark all as read
   axios.patch(
-    `http://localhost:5000/api/chat/${selectedTeam._id}/read`,
+    `${BACKEND_URL}/api/chat/${selectedTeam._id}/read`,
     {},
     { withCredentials: true }
   ).catch(err => console.log('Mark read error:', err));
@@ -105,8 +106,8 @@ const fetchMessages = async (before = null) => {
   try {
     setLoadingMessages(true);
     const url = before
-      ? `http://localhost:5000/api/chat/${selectedTeam._id}/messages?limit=50&before=${before}`
-      : `http://localhost:5000/api/chat/${selectedTeam._id}/messages?limit=50`;
+      ? `${BACKEND_URL}/api/chat/${selectedTeam._id}/messages?limit=50&before=${before}`
+      : `${BACKEND_URL}/api/chat/${selectedTeam._id}/messages?limit=50`;
 
     const res = await axios.get(url, { withCredentials: true });
     if (res.data.success) {
@@ -217,7 +218,7 @@ const formatDate = (dateStr) => {
 
   const fetchMyTeams = async () => {
     try {
-      const res = await axios.get('http://localhost:5000/api/team/my-teams', {
+      const res = await axios.get(`${BACKEND_URL}/api/team/my-teams`, {
         withCredentials: true
       });
       setMyTeams(res.data.teams || []);
@@ -228,7 +229,7 @@ const formatDate = (dateStr) => {
 
   const handleCreateTeam = async () => {
     try {
-      const res = await axios.post('http://localhost:5000/api/team/create', createTeamData, {
+      const res = await axios.post(`${BACKEND_URL}/api/team/create`, createTeamData, {
         withCredentials: true
       });
       if (res.data.success) {
@@ -259,7 +260,7 @@ const formatDate = (dateStr) => {
     try {
       // Step 1 — set current team via REST (still needed so backend knows which team)
       await axios.post(
-        `http://localhost:5000/api/team/${selectedTeam._id}/set-current`,
+        `${BACKEND_URL}/api/team/${selectedTeam._id}/set-current`,
         {},
         { withCredentials: true }
       );
@@ -293,7 +294,7 @@ const handleInvite = async () => {
   try {
     // Search user first to get their _id
     const searchRes = await axios.get(
-      `http://localhost:5000/api/user/search?query=${inviteUserId}`,
+      `${BACKEND_URL}/api/user/search?query=${inviteUserId}`,
       { withCredentials: true }
     );
     
@@ -306,7 +307,7 @@ const handleInvite = async () => {
     
     // Now send actual _id
     const res = await axios.post(
-      `http://localhost:5000/api/team/${selectedTeam._id}/invite`,
+      `${BACKEND_URL}/api/team/${selectedTeam._id}/invite`,
       { userIdToInvite: targetUser._id },  // ← real _id
       { withCredentials: true }
     );
@@ -326,7 +327,7 @@ const handleInvite = async () => {
     
     try {
       const res = await axios.post(
-        `http://localhost:5000/api/team/${selectedTeam._id}/kick`,
+        `${BACKEND_URL}/api/team/${selectedTeam._id}/kick`,
         { userIdToKick: memberId },
         { withCredentials: true }
       );
@@ -343,7 +344,7 @@ const handleInvite = async () => {
   const handleAddTopic = async (topic) => {
     try {
       const res = await axios.patch(
-        `http://localhost:5000/api/team/${selectedTeam._id}/update`,
+        `${BACKEND_URL}/api/team/${selectedTeam._id}/update`,
         { addTopic: topic },
         { withCredentials: true }
       );
@@ -358,7 +359,7 @@ const handleInvite = async () => {
   const handleRemoveTopic = async (topic) => {
     try {
       const res = await axios.patch(
-        `http://localhost:5000/api/team/${selectedTeam._id}/update`,
+        `${BACKEND_URL}/api/team/${selectedTeam._id}/update`,
         { removeTopic: topic },
         { withCredentials: true }
       );

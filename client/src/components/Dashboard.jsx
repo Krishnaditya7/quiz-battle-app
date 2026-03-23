@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { BACKEND_URL } from '../config';
 
 function DiscussionHistoryCard({ game }) {
   const [expanded, setExpanded] = useState(false);
@@ -104,7 +105,7 @@ export default function Dashboard() {
 
   const fetchUserData = async () => {
     try {
-      const res = await axios.get('http://localhost:5000/api/auth/me', { withCredentials: true });
+      const res = await axios.get(`${BACKEND_URL}/api/auth/me`, { withCredentials: true });
       if (res.data.success) {
         setUser(res.data.user);
         setBio(res.data.user.bio || '');
@@ -119,7 +120,7 @@ export default function Dashboard() {
 
   const fetchGameHistory = async () => {
     try {
-      const res = await axios.get('http://localhost:5000/api/game/history', { withCredentials: true });
+      const res = await axios.get(`${BACKEND_URL}/api/game/history`, { withCredentials: true });
       if (res.data.success) setGameHistory(res.data.games || []);
     } catch (err) {
       console.error('Failed to fetch games:', err);
@@ -128,7 +129,7 @@ export default function Dashboard() {
 
   const handleUpdateBio = async () => {
     try {
-      const res = await axios.patch('http://localhost:5000/api/auth/update-bio', { bio }, { withCredentials: true });
+      const res = await axios.patch(`${BACKEND_URL}/api/auth/update-bio`, { bio }, { withCredentials: true });
       if (res.data.success) {
         alert('Bio updated!');
         setEditingBio(false);
@@ -141,7 +142,7 @@ export default function Dashboard() {
 
   const handleLogout = async () => {
     try {
-      await axios.post('http://localhost:5000/api/auth/logout', {}, { withCredentials: true });
+      await axios.post(`${BACKEND_URL}/api/auth/logout`, {}, { withCredentials: true });
     } catch (err) {
       console.error('Logout error:', err);
     }
