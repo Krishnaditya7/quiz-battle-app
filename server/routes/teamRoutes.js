@@ -1,5 +1,5 @@
 import express from 'express';
-import  protect  from '../middleware/authMiddleware.js';
+import protect from '../middleware/authMiddleware.js';
 import {
   createTeam, getTeam, browseTeams, requestJoinTeam,
   approveJoinRequest, leaveTeam, kickMember, updateTeam,

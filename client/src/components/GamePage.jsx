@@ -1,8 +1,30 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
 
 import TeamManagementModal from './CreateTeam';
 import JoinTeamsModal from './JoinTeam';
+import { BACKEND_URL } from "../config";
+
+// ─────────────────────────────────────────────
+// Hook: fetch AI-generated trending topics from backend
+// Backend hits GNews → Gemini → Redis (see Topicservice.js)
+// ─────────────────────────────────────────────
+function useTrendingTopics() {
+  const [aiTopics, setAiTopics] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    axios.get(`${BACKEND_URL}/api/topics/gettopic`)
+      .then(res => {
+        if (res.data.success) setAiTopics(res.data.topics || []);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  return { aiTopics, loading };
+}
 
 export default function GamePage({ socket, user }) {
   const navigate = useNavigate();
@@ -19,10 +41,7 @@ export default function GamePage({ socket, user }) {
     opponentType: 'default'
   });
 
-  const topics = [
-    'Math', 'Science', 'Physics', 'Chemistry', 'Biology',
-    'History', 'Geography', 'English', 'Computer Science'
-  ];
+  const { aiTopics, loading: topicsLoading } = useTrendingTopics();
 
   const handleSoloQueue = () => {
     if (!socket) {
@@ -30,7 +49,7 @@ export default function GamePage({ socket, user }) {
       return;
     }
     if (!soloQueueData.topic) {
-      alert('Please select topic');
+      alert('Please select a topic');
       return;
     }
     setIsQueuing(true);
@@ -109,13 +128,6 @@ export default function GamePage({ socket, user }) {
         @keyframes gp-glow-pulse {
           0%,100% { opacity: 0.1; transform: scale(1); }
           50%      { opacity: 0.2; transform: scale(1.06); }
-        }
-        @keyframes gp-orbit {
-          from { transform: rotate(0deg) translateX(160px) rotate(0deg); }
-          to   { transform: rotate(360deg) translateX(160px) rotate(-360deg); }
-        }
-        @keyframes gp-card-hover-glow {
-          0%,100% { box-shadow: 0 0 0 0 transparent; }
         }
         @keyframes gp-scan {
           0%   { transform: translateY(-100%); opacity: 0; }
@@ -415,17 +427,55 @@ export default function GamePage({ socket, user }) {
 
               <div className="space-y-5">
 
-                {/* Topic */}
+                {/* Topic — AI-powered trending topics from GNews + Gemini */}
                 <div>
-                  <label className="gp-label"><span>*</span> Topic</label>
+                  <label className="gp-label">
+                    <span>*</span> Topic
+                    {/* Badge showing this is AI-generated */}
+                    <span style={{
+                      marginLeft: '0.5rem',
+                      padding: '0.1rem 0.5rem',
+                      borderRadius: '6px',
+                      background: 'rgba(168,85,247,0.15)',
+                      border: '1px solid rgba(168,85,247,0.3)',
+                      color: 'rgba(168,85,247,0.8)',
+                      fontSize: '0.55rem',
+                      letterSpacing: '0.08em',
+                      verticalAlign: 'middle',
+                    }}>✦ AI · TODAY</span>
+                  </label>
+
                   <select
                     value={soloQueueData.topic}
                     onChange={(e) => setSoloQueueData({ ...soloQueueData, topic: e.target.value })}
                     className="gp-select"
+                    disabled={topicsLoading}
                   >
-                    <option value="">Select topic</option>
-                    {topics.map(t => <option key={t} value={t}>{t}</option>)}
+                    {topicsLoading ? (
+                      <option value="">⏳ Loading today's topics...</option>
+                    ) : aiTopics.length === 0 ? (
+                      <option value="">No topics available right now</option>
+                    ) : (
+                      <>
+                        <option value="">Select a topic</option>
+                        {aiTopics.map(t => (
+                          <option key={t.category} value={t.category}>
+                            {t.emoji ? `${t.emoji} ${t.category}` : t.category}
+                          </option>
+                        ))}
+                      </>
+                    )}
                   </select>
+
+                  {/* Show the matched topic description as a hint */}
+                  {soloQueueData.topic && (() => {
+                    const matched = aiTopics.find(t => t.category === soloQueueData.topic);
+                    return matched ? (
+                      <p style={{ fontFamily: "'Space Mono', monospace", fontSize: '0.62rem', color: 'rgba(168,85,247,0.6)', marginTop: '0.4rem' }}>
+                        → {matched.description}
+                      </p>
+                    ) : null;
+                  })()}
                 </div>
 
                 {/* Player Count */}
@@ -482,7 +532,7 @@ export default function GamePage({ socket, user }) {
                 {/* Submit */}
                 <button
                   onClick={handleSoloQueue}
-                  disabled={!socket || !user || !soloQueueData.topic || isQueuing}
+                  disabled={!socket || !user || !soloQueueData.topic || isQueuing || topicsLoading}
                   className="gp-submit-btn"
                 >
                   {!user ? 'Loading...' : isQueuing ? '⏳ Searching...' : '⚡ Find Match'}

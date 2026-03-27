@@ -4,6 +4,7 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import mongoose from 'mongoose';
 import cookieParser from 'cookie-parser';
+import cron from 'node-cron';
 
 import { registerGameSockets } from './utils/socketGameService.js';
 import authRoutes from './routes/authRoutes.js';
@@ -15,7 +16,12 @@ import leaderboardRoutes from './routes/leaderboardRoutes.js';
  import { createTeamRoutes } from './routes/teamRoutes.js';
 import Notificationroutes from './routes/Notificationroutes.js';
 import userRoutes from './routes/userRoutes.js'
+import { fetchAndCacheTopics } from './utils/Topicservice.js';
+import topicRoutes from './routes/Topicroutes.js';
+import redis from './config/redis.js';
 
+
+const REDIS_KEY = 'app:trending_topics';
 const app = express();
 const httpServer = http.createServer(app);
 
@@ -46,6 +52,7 @@ app.use('/api/game', gameRoutes);
 app.use('/api/friend', friendRoutes);
 app.use('/api/leaderboard', leaderboardRoutes);
 app.use('/api/user',userRoutes);
+app.use('/api/topics', topicRoutes); 
 
 
 
@@ -54,10 +61,29 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
 // ── MongoDB ──
 mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log('✅ MongoDB connected'))
+.then(async () => {
+    console.log('✅ MongoDB connected');
+ 
+    // Fetch topics on server boot so they're ready immediately
+    
+ 
+    // Refresh every 6 hours: at 00:00, 06:00, 12:00, 18:00
+    cron.schedule('0 */6 * * *', async () => {
+      console.log('⏰ Cron: refreshing trending topics...');
+      const cached = await redis.get(REDIS_KEY);
+
+      if (cached) {
+          console.log('⚡ Using cached topics (no API call)');
+        } else {
+          console.log('🆕 No cache found, fetching topics...');
+          await fetchAndCacheTopics();
+         }
+    });
+  })
   .catch((err) => console.error('❌ MongoDB error:', err));
 
 // ── Socket.IO game logic ──
+// Temporary — find available models
 registerGameSockets(io);
 
 // ── Start ──
