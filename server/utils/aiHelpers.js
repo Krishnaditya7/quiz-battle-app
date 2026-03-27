@@ -7,7 +7,7 @@
 
 import Groq from 'groq-sdk';
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+
 
 // ─────────────────────────────────────────────
 // Generate a single discussion question for a topic.
@@ -15,6 +15,7 @@ const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 // the next question (Q1 on match start, Q2+ on leader ready).
 // ─────────────────────────────────────────────
 export async function generateDiscussionQuestion(topic, questionNumber) {
+  const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
   try {
     const prompt = `Generate discussion question #${questionNumber} about "${topic}".
 Rules:

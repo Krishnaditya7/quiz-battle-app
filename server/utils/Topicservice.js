@@ -7,7 +7,7 @@
 import Groq from 'groq-sdk';
 import redis from '../config/redis.js';
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+
 
 const REDIS_KEY = 'app:trending_topics';
 const TTL_SECONDS = 6 * 60 * 60; // 6 hours
@@ -30,6 +30,7 @@ async function fetchHeadlines() {
 // STEP 2: Ask Groq to categorize + generate questions
 // ─────────────────────────────────────────────
 async function categorizeWithGroq(headlines) {
+  const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
   const headlineText = headlines
     .map((h, i) => `${i + 1}. ${h.title} — ${h.description}`)
     .join('\n');
