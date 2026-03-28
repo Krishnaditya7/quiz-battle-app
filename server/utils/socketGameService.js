@@ -1150,7 +1150,37 @@ async function endDiscussionGame(io, gameId) {
     console.error('endDiscussionGame error:', err);
   }
 }
+// ── XP thresholds based on average rating received ──
+function xpFromRating(avgStars) {
+  if (avgStars >= 4.5) return 50;  // exceptional
+  if (avgStars >= 3.5) return 30;  // good
+  if (avgStars >= 2.5) return 15;  // decent
+  return 5;                         // participated
+}
 
+async function awardXpToPlayers(allPlayerIds, ratings) {
+  for (const userId of allPlayerIds) {
+    // All ratings THIS player received in this game
+    const received = ratings.filter(r => r.ratedUserId === userId);
+
+    const xpGain = received.length > 0
+      ? xpFromRating(received.reduce((s, r) => s + r.stars, 0) / received.length)
+      : 5; // base XP just for participating even if no one rated them
+
+    const user = await User.findById(userId);
+    if (!user) continue;
+
+    user.xp += xpGain;
+
+    // Level up check — every 100 XP = 1 level
+    const newLevel = Math.floor(user.xp / 100) + 1;
+    const didLevelUp = newLevel > user.level;
+    if (didLevelUp) user.level = newLevel;
+
+    await user.save();
+    console.log(`🎖️ ${user.username} +${xpGain} XP → total ${user.xp} XP | Level ${user.level}${didLevelUp ? ' ⬆️ LEVEL UP!' : ''}`);
+  }
+}
 async function saveDiscussionHistory(gameId, session) {
   try {
     const existing = await GameHistory.findOne({ gameId });
@@ -1177,7 +1207,11 @@ async function saveDiscussionHistory(gameId, session) {
     }
 
     const ratings = await R.getGameRatings(gameId);
+   
 
+        // ── Award XP based on ratings received ──
+        const allPlayerIds = [...teamAIds, ...teamBIds];
+        await awardXpToPlayers(allPlayerIds, ratings);
     await GameHistory.create({
       gameId,
       topic: session.topic,

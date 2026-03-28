@@ -13,6 +13,7 @@ import WaitingRoom from "./components/Waitingroom";
 import GameRoom from "./components/Gameroom";
 import GameResults from "./components/Gameresults";
 import NotificationPage from './components/NotificationsPage';
+import LeaderBoard from "./components/LeaderBoard";
 
 // Add this component in App.jsx above the function
 function App() {
@@ -92,6 +93,7 @@ function App() {
         <Route path="/game-room" element={user ? <GameRoom socket={socket} user={user} /> : <Navigate to="/auth" />} />
         <Route path="/game-results" element={user ? <GameResults socket={socket} user={user} /> : <Navigate to="/auth" />} />
         <Route path="/notifications" element={user ? <NotificationPage socket={socket} user={user} /> : <Navigate to="/auth" />} />
+        <Route path="/LeaderBoard" element = {user? <LeaderBoard /> : <Navigate to = "/auth" /> } />
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>
     </BrowserRouter>

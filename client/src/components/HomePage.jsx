@@ -318,7 +318,7 @@ export default function HomePage({ user: propUser }) {
                   </span>
                 )}
               </button>
-              <button className="nav-link text-white/70 hover:text-white transition-colors duration-200">
+              <button onClick={() => navigate('/LeaderBoard')} className="nav-link text-white/70 hover:text-white transition-colors duration-200">
                 Leaderboard
               </button>
               {currentUser ? (

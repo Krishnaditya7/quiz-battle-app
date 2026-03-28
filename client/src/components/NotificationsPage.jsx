@@ -79,6 +79,32 @@ export default function NotificationPage({ socket, user }) {
       alert(err.response?.data?.message || 'Failed to approve');
     }
   };
+//creating friend request notification
+  const handleAcceptFriend = async (notification) => {
+  try {
+    await axios.post(
+      `${BACKEND_URL}/api/friend/accept`,
+      { notificationId: notification._id },
+      { withCredentials: true }
+    );
+    fetchNotifications();
+  } catch (err) {
+    alert(err.response?.data?.message || 'Failed to accept friend request');
+  }
+};
+
+const handleRejectFriend = async (notification) => {
+  try {
+    await axios.post(
+      `${BACKEND_URL}/api/friend/reject`,
+      { notificationId: notification._id },
+      { withCredentials: true }
+    );
+    fetchNotifications();
+  } catch (err) {
+    alert(err.response?.data?.message || 'Failed to reject friend request');
+  }
+}; 
 
   const handleMarkAllRead = async () => {
     try {
@@ -263,6 +289,23 @@ export default function NotificationPage({ socket, user }) {
                               className="px-5 py-2 bg-red-600 hover:bg-red-500 rounded-xl font-bold text-sm transition-all"
                             >
                               ❌ Reject
+                            </button>
+                          </>
+                        )}
+                        {/* Friend request — shown to recipient */}
+                        {notification.type === 'friend_request' && (
+                          <>
+                            <button
+                              onClick={() => handleAcceptFriend(notification)}
+                              className="px-5 py-2 bg-green-600 hover:bg-green-500 rounded-xl font-bold text-sm transition-all"
+                            >
+                              ✅ Accept
+                            </button>
+                            <button
+                              onClick={() => handleRejectFriend(notification)}
+                              className="px-5 py-2 bg-red-600 hover:bg-red-500 rounded-xl font-bold text-sm transition-all"
+                            >
+                              ❌ Decline
                             </button>
                           </>
                         )}

@@ -18,6 +18,7 @@ import Notificationroutes from './routes/Notificationroutes.js';
 import userRoutes from './routes/userRoutes.js'
 import { fetchAndCacheTopics } from './utils/Topicservice.js';
 import topicRoutes from './routes/Topicroutes.js';
+import gameHistory from './routes/Gameoutes.js';
 import redis from './config/redis.js';
 
 
@@ -53,6 +54,7 @@ app.use('/api/friend', friendRoutes);
 app.use('/api/leaderboard', leaderboardRoutes);
 app.use('/api/user',userRoutes);
 app.use('/api/topics', topicRoutes); 
+app.use('/api/question',gameHistory)
 
 
 

@@ -4,7 +4,7 @@ import { getLeaderboard, getTop3, updateBio } from '../controllers/leaderboardCo
 
 const router = express.Router();
 
-router.get('/', getLeaderboard);  // GET /api/leaderboard?type=global
+router.get('/all', getLeaderboard);  // GET /api/leaderboard?type=global
 router.get('/top3', getTop3);     // GET /api/leaderboard/top3
 router.patch('/bio', protect, updateBio);  // PATCH /api/leaderboard/bio
 

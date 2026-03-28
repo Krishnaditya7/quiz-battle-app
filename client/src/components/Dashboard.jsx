@@ -97,10 +97,14 @@ export default function Dashboard() {
   const [editingBio, setEditingBio] = useState(false);
   const [gameHistory, setGameHistory] = useState([]);
   const [loading, setLoading] = useState(true);
-
+  const [friends, setFriends] = useState([]);
+  const [friendsLoading, setFriendsLoading] = useState(true);
+  const [friendsOpen, setFriendsOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   useEffect(() => {
     fetchUserData();
     fetchGameHistory();
+    fetchFriends();
   }, []);
 
   const fetchUserData = async () => {
@@ -120,13 +124,22 @@ export default function Dashboard() {
 
   const fetchGameHistory = async () => {
     try {
-      const res = await axios.get(`${BACKEND_URL}/api/game/history`, { withCredentials: true });
+      const res = await axios.get(`${BACKEND_URL}/api/question/history`, { withCredentials: true });
       if (res.data.success) setGameHistory(res.data.games || []);
     } catch (err) {
       console.error('Failed to fetch games:', err);
     }
   };
-
+  const fetchFriends = async () => {
+  try {
+    const res = await axios.get(`${BACKEND_URL}/api/friend/list`, { withCredentials: true });
+    if (res.data.success) setFriends(res.data.friends || []);
+  } catch (err) {
+    console.error('Failed to fetch friends:', err);
+  } finally {
+    setFriendsLoading(false);
+  }
+};
   const handleUpdateBio = async () => {
     try {
       const res = await axios.patch(`${BACKEND_URL}/api/auth/update-bio`, { bio }, { withCredentials: true });
@@ -464,17 +477,66 @@ export default function Dashboard() {
             </div>
 
             {/* Friends */}
-            <div>
-              <div className="db-section-title">FRIENDS</div>
-              <div className="db-card" style={{ padding: '2.5rem', textAlign: 'center' }}>
-                <div style={{ fontSize: '3rem', marginBottom: '0.75rem', filter: 'grayscale(0.5)' }}>👥</div>
-                <p className="db-tag" style={{ color: 'rgba(255,255,255,0.25)' }}>Friends feature coming soon...</p>
-              </div>
-            </div>
 
+<div>
+  <button
+    onClick={() => setFriendsOpen(o => !o)}
+    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', background: 'none', border: 'none', cursor: 'pointer', marginBottom: friendsOpen ? '1rem' : 0 }}
+  >
+    <div className="db-section-title" style={{ marginBottom: 0 }}>FRIENDS ({friends.length})</div>
+    <span style={{ color: 'rgba(168,85,247,0.7)', fontSize: '0.75rem', fontFamily: "'Space Mono', monospace" }}>
+      {friendsOpen ? '▲ hide' : '▼ show'}
+    </span>
+  </button>
+
+  {friendsOpen && (
+  <div className="db-card" style={{ padding: '1.25rem' }}>
+    {friendsLoading ? (
+      <p className="db-tag" style={{ color: 'rgba(255,255,255,0.25)', textAlign: 'center', padding: '1.5rem 0' }}>
+        Loading...
+      </p>
+    ) : friends.length === 0 ? (
+      <div style={{ textAlign: 'center', padding: '2rem 1rem' }}>
+        <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>👥</div>
+        <p className="db-tag" style={{ color: 'rgba(255,255,255,0.25)' }}>No friends yet</p>
+      </div>
+    ) : (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+        {friends.map(friend => (
+          <div
+            key={friend._id}
+            style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', padding: '0.75rem 1rem', borderRadius: '12px', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', transition: 'border-color 0.2s' }}
+            onMouseEnter={e => e.currentTarget.style.borderColor = 'rgba(168,85,247,0.3)'}
+            onMouseLeave={e => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)'}
+          >
+            <div style={{ width: '38px', height: '38px', borderRadius: '50%', background: 'linear-gradient(135deg, #7c3aed, #ec4899)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem', flexShrink: 0 }}>
+              {friend.profilePic || '👤'}
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: '0.9rem' }}>{friend.username}</div>
+              <div className="db-tag" style={{ color: 'rgba(255,255,255,0.3)', marginTop: '2px' }}>Lvl {friend.level} · {friend.xp} XP</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    )}
+  </div>
+  )}
+</div>
             {/* Discussion History */}
             <div>
-              <div className="db-section-title">DISCUSSION HISTORY</div>
+               <button
+    onClick={() => setHistoryOpen(o => !o)}
+    style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', background: 'none', border: 'none', cursor: 'pointer', marginBottom: historyOpen ? '1rem' : 0 }}
+  >
+    <div className="db-section-title" style={{ marginBottom: 0 }}>DISCUSSION HISTORY ({gameHistory.length})</div>
+    <span style={{ color: 'rgba(168,85,247,0.7)', fontSize: '0.75rem', fontFamily: "'Space Mono', monospace" }}>
+      {historyOpen ? '▲ hide' : '▼ show'}
+    </span>
+  </button>
+
+           {historyOpen && (
+              
               <div className="db-card" style={{ padding: '1.25rem' }}>
                 {gameHistory.length === 0 ? (
                   <div style={{ textAlign: 'center', padding: '3rem 1rem' }}>
@@ -498,6 +560,7 @@ export default function Dashboard() {
                   </div>
                 )}
               </div>
+           )}
             </div>
 
           </div>
