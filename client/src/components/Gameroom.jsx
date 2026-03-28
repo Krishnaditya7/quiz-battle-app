@@ -577,10 +577,10 @@ useEffect(() => {
     navigate('/dashboard');
   };
 
-  const handleAddFriend = async (targetUserId) => {
+  const handleAddFriend = async (toUserId) => {
     try {
       await axios.post(`${BACKEND_URL}/api/friend/request`,
-        { recipientId: targetUserId }, { withCredentials: true });
+        { recipientId: toUserId }, { withCredentials: true });
       notify('Friend request sent!', 'success');
     } catch (e) {
       notify(e.response?.data?.message || 'Failed to send request', 'error');

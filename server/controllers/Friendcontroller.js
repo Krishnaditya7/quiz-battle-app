@@ -13,6 +13,7 @@ export const sendFriendRequest = async (req, res) => {
 
     const toUser = await User.findById(toUserId);
     if (!toUser) {
+      console.log(toUserId);
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 

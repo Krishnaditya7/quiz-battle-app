@@ -985,7 +985,9 @@ async function tryMatch(io, { topic, playerCount, questionCount }) {
           console.log(`⚠️ Skipping ${e2.username} — already in a game`);
           continue;
         }
-
+        const e1Claiming = await redis.get(`claiming:${e1.userId}`);
+        const e2Claiming = await redis.get(`claiming:${e2.userId}`);
+        if (e1Claiming || e2Claiming) continue;
         if (!canMatch(e1, e2)) continue;
 
         const e1Count = getPlayerCount(e1);
@@ -999,6 +1001,20 @@ async function tryMatch(io, { topic, playerCount, questionCount }) {
         const e2Satisfied = !e2Wants || e1Count === e2Wants;
 
         if (e1Satisfied && e2Satisfied) {
+          const claimKey1 = `claiming:${e1.userId}`;
+          const claimKey2 = `claiming:${e2.userId}`;
+          
+          // NX = only set if not exists — if either fails, someone else grabbed them
+          const claimed1 = await redis.set(claimKey1, '1', 'NX', 'PX', 10000);
+          const claimed2 = await redis.set(claimKey2, '1', 'NX', 'PX', 10000);
+          
+          if (!claimed1 || !claimed2) {
+            // One of them was already claimed by a concurrent tryMatch — release and skip
+            if (claimed1) await redis.del(claimKey1);
+            if (claimed2) await redis.del(claimKey2);
+            console.log(`⚠️ Claim failed for ${e1.username} or ${e2.username} — skipping`);
+            continue;
+          }
           console.log(`✅ MATCH: ${e1.username}(has ${e1Count}, wants ${e1.opponentType}) vs ${e2.username}(has ${e2Count}, wants ${e2.opponentType})`);
           await createMatch(io, e1, e2);
           return;
