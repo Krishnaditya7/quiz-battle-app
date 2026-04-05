@@ -32,7 +32,8 @@ async function fetchHeadlines() {
 async function categorizeWithGroq(headlines) {
   const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
   const headlineText = headlines
-    .map((h, i) => `${i + 1}. ${h.title} — ${h.description}`)
+    .slice(0, 10)
+    .map((h, i) => `${i + 1}. ${h.title}`)
     .join('\n');
 
   const prompt = `
@@ -57,12 +58,16 @@ Respond ONLY in this exact JSON format with no extra text, no markdown, no backt
   const result = await groq.chat.completions.create({
     messages: [{ role: 'user', content: prompt }],
     model: 'llama-3.1-8b-instant',
-    max_tokens: 600,   // way smaller now — no questions to generate
+    max_tokens: 1200, // give it more breathing room,   // way smaller now — no questions to generate
     temperature: 0.7,
   });
 
   const text = result.choices[0]?.message?.content?.trim();
   const clean = text.replace(/```json|```/g, '').trim();
+  if (!clean.endsWith('}')) {
+  console.warn('⚠️ Groq response appears truncated');
+  throw new Error('Truncated JSON from Groq');
+}
   return JSON.parse(clean);
 }
 // ─────────────────────────────────────────────
