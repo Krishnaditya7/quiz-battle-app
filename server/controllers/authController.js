@@ -90,18 +90,7 @@ export const SignUp = async (req, res) => {
 
     console.log('✅ User created:', newUser._id);
 
-    // Generate token
-    const token = jwt.sign(
-      { userId: newUser._id },
-      process.env.JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
+    
 
     res.status(201).json({
       success: true,
