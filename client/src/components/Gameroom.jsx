@@ -332,6 +332,14 @@ const startSpeakingDetection = useCallback((stream, userId) => {
   const callPeer = useCallback(async (targetUserId) => {
     if (targetUserId === user?._id) return;
     try {
+      const existingPc = peerConnectionsRef.current[targetUserId];
+
+    // ✅ Don't re-offer if already connected!
+    if (existingPc && existingPc.signalingState !== 'stable') return;
+    if (existingPc && existingPc.connectionState === 'connected') {
+      // just replace the track instead of full renegotiation
+      return;
+    }
       const pc = createPeerConnection(targetUserId);
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
@@ -468,6 +476,10 @@ const startSpeakingDetection = useCallback((stream, userId) => {
     // WebRTC signaling
     socket.on('webrtc:offer', async ({ offer, fromUserId }) => {
       const pc = createPeerConnection(fromUserId);
+      if (pc.signalingState !== 'stable') {
+    console.warn('Ignoring offer — signalingState:', pc.signalingState);
+    return;
+  }
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
