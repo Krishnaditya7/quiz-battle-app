@@ -10,25 +10,6 @@ const generateToken = (userId) => {
         
     );
 };
-const sendTokenCookie = (res, token) => {
-    res.cookie('token', token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: process.env.NODE_ENV ==='production' ? 'none' : 'lax',
-        maxAge:  7* 24 * 60 * 60 * 1000,
-    });
-
-    /*If your frontend and backend are on different domains (like):
-
-Frontend:
-
-localhost:3000  sameSite: 'none',
-secure: true
-
-Backend:
-
-${BACKEND_URL}*/
-};
 export const SignUp = async (req, res) => {
   try {
     const { username, email, password, className, dob, topics } = req.body;
@@ -150,11 +131,12 @@ export const login = async (req,res) => {
         });
     }
 const token = generateToken(user._id);
-    sendTokenCookie(res, token);
+    
 
     return res.status(200).json({
       success: true,
       message: 'Logged in successfully!',
+      token,
       user: {
         _id: user._id,
         username: user.username,
