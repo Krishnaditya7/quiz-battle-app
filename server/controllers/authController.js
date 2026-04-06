@@ -72,7 +72,7 @@ export const SignUp = async (req, res) => {
     console.log('✅ User created:', newUser._id);
 
     
-   const token = generateToken(user._id);
+   const token = generateToken(newUser._id);
     res.status(201).json({
       success: true,
       token,
@@ -165,6 +165,7 @@ export const logout= async (req,res) => {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: process.env.NODE_ENV ==='production' ? 'none' : 'lax',
+      
     });
 
     return res.status(200).json({ success: true, message: 'Logged out successfully' });

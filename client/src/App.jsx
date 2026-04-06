@@ -90,8 +90,8 @@ function App() {
     <SocketListener socket={socket} user={user} />
       <Routes>
         <Route path="/" element={<HomePage user={user} />} />
-        <Route path="/auth" element={user ? <Navigate to="/dashboard" /> : <AuthPage setUser={setUser} />} />
-        <Route path="/dashboard" element={user ? <Dashboard /> : <Navigate to="/auth" />} />
+        <Route path="/auth" element={user ? <Navigate to="/" /> : <AuthPage setUser={setUser} />} />
+        <Route path="/dashboard" element={user ? <Dashboard setUser={setUser} /> : <Navigate to="/auth" />} />
         <Route path="/game" element={user ? <GamePage socket={socket} user={user} /> : <Navigate to="/auth" />} />
         <Route path="/waiting-room" element={user ? <WaitingRoom socket={socket} user={user} /> : <Navigate to="/auth" />} />
         <Route path="/game-room" element={user ? <GameRoom socket={socket} user={user} /> : <Navigate to="/auth" />} />

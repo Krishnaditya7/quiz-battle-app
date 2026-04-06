@@ -159,7 +159,11 @@ export default function Dashboard() {
     } catch (err) {
       console.error('Logout error:', err);
     }
-    navigate('/');
+      localStorage.removeItem('token');
+  localStorage.removeItem('user');
+  delete axios.defaults.headers.common['Authorization'];
+  setUser(null);
+    navigate("/");
   };
 
   if (loading) {

@@ -110,7 +110,8 @@ export default function AuthPage({ setUser }) {
       });
       const token = authRes.data.token;
       if(token){
-        localStorage.setItem('authToken',token);
+        localStorage.setItem('token',token);
+        axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
       }
      const profileRes = await axios.get(
       `${BACKEND_URL}/api/auth/me`,
@@ -123,7 +124,7 @@ export default function AuthPage({ setUser }) {
     if (profileRes.data.user) {
       setUser(profileRes.data.user);// Ideally lift this to global context
       localStorage.setItem('user', JSON.stringify(profileRes.data.user));
-      navigate("/dashboard");
+      navigate("/");
     }
     } catch (err) {
       setErrors({ 
