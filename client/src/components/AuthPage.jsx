@@ -106,7 +106,7 @@ export default function AuthPage({ setUser }) {
         : formData;
 
       const authRes =await axios.post(`${BACKEND_URL}${endpoint}`, payload, {
-       
+       withCredentials: true
       });
       const token = authRes.data.token;
       if(token){
@@ -114,8 +114,9 @@ export default function AuthPage({ setUser }) {
       }
      const profileRes = await axios.get(
       `${BACKEND_URL}/api/auth/me`,
-      { headers:{
-        Authorization: `Bearer ${token}` },
+      {withCredentials: true,
+
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
       }
     );
 

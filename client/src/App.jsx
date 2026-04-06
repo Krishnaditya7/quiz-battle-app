@@ -22,6 +22,12 @@ function App() {
   const socketRef = useRef(null);
   const [socket, setSocket] = useState(null);
 
+  useEffect(() => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+  }
+}, []);
     useEffect(() => {
     const checkAuth = async () => {
       try {
