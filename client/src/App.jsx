@@ -23,14 +23,12 @@ function App() {
   const [socket, setSocket] = useState(null);
 
     useEffect(() => {
-        useEffect(() => {
-  const token = localStorage.getItem('token');
-  if (token) {
-    axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-  }
-}, []);
     const checkAuth = async () => {
       try {
+         const token = localStorage.getItem('token');
+      if (token) {
+        axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      }
         const res = await axios.get(`${BACKEND_URL}/api/auth/me`, {
           withCredentials: true,
           headers: { 'Cache-Control': 'no-cache' }
