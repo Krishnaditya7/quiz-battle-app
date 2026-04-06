@@ -105,12 +105,18 @@ export default function AuthPage({ setUser }) {
         ? { emailOrUsername: formData.email, password: formData.password }
         : formData;
 
-      await axios.post(`${BACKEND_URL}${endpoint}`, payload, {
-        withCredentials: true
+      const authRes =await axios.post(`${BACKEND_URL}${endpoint}`, payload, {
+       
       });
+      const token = authRes.data.token;
+      if(token){
+        localStorage.setItem('authToken',token);
+      }
      const profileRes = await axios.get(
       `${BACKEND_URL}/api/auth/me`,
-      { withCredentials: true }
+      { headers:{
+        Authorization: `Bearer ${token}` },
+      }
     );
 
     if (profileRes.data.user) {
