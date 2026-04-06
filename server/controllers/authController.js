@@ -48,7 +48,7 @@ export const SignUp = async (req, res) => {
     // Hash password
     console.log('🔐 Hashing password...');
     const hashedPassword = await bcrypt.hash(password, 12);
-
+  
     // Create user
     console.log('👤 Creating user...');
     const newUser = await User.create({
@@ -72,9 +72,10 @@ export const SignUp = async (req, res) => {
     console.log('✅ User created:', newUser._id);
 
     
-
+   const token = generateToken(user._id);
     res.status(201).json({
       success: true,
+      token,
       user: {
         _id: newUser._id,
         username: newUser.username,
