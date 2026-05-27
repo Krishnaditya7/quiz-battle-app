@@ -46,16 +46,17 @@ export const isUserOnline = async (userId) => {
 
 export const addToQueue = async (userId, queueData) => {
   const { 
-    username, level, topic, questionCount, playerCount, opponentType, 
+    username, level, Games, topic, questionCount, playerCount, opponentType, 
     playerClass, teamId, onlineTeamMembers 
   } = queueData;
   
-  const queueKey = K.matchQueue(topic, questionCount);
+  const queueKey = K.matchQueue(Games, topic, questionCount);
   // Store full entry data
   await redis.hset(K.queueEntry(userId), {
     userId,
     username,
     level,
+    Games,
     topic,
     questionCount,
     playerCount,
@@ -74,14 +75,14 @@ export const addToQueue = async (userId, queueData) => {
   return queueKey;
 };
 
-export const removeFromQueue = async (userId, topic, questionCount) => {
-  const queueKey = K.matchQueue(topic, questionCount);
+export const removeFromQueue = async (userId,Games, topic, questionCount) => {
+  const queueKey = K.matchQueue(Games, topic, questionCount);
   await redis.lrem(queueKey, 0, userId);
   await redis.del(K.queueEntry(userId));
 };
 
-export const getQueueLength = async (topic, questionCount) => {
-  return await redis.llen(K.matchQueue(topic, questionCount));
+export const getQueueLength = async (Games, topic, questionCount) => {
+  return await redis.llen(K.matchQueue(Games,topic, questionCount));
 };
 export const getAllQueueEntriesForTopic = async (topic) => {
   // Get all queue keys matching this topic
@@ -105,8 +106,8 @@ export const getAllQueueEntriesForTopic = async (topic) => {
   return allEntries;
 };
 
-export const getQueueEntries = async (topic, questionCount) => {
-  const queueKey = K.matchQueue(topic, questionCount);
+export const getQueueEntries = async (Games,topic, questionCount) => {
+  const queueKey = K.matchQueue(Games,topic, questionCount);
   const userIds = await redis.lrange(queueKey, 0, -1); // Get all userIds in this queue
   if (!userIds.length) return [];
 
@@ -126,11 +127,12 @@ export const getUserQueueEntry = async (userId) => {
 // TEMPORARY TEAM (solo players grouped for duo/trio/squad)
 // ─────────────────────────────────────────────
 
-export const createTempTeam = async (topic, questionCount, opponentType, playerCount) => {
+export const createTempTeam = async (Games,topic, questionCount, opponentType, playerCount) => {
   const tempTeamId = uuid();
   await redis.hset(K.tempTeam(tempTeamId), {
     tempTeamId,
     members: JSON.stringify(members), // array of { userId, username, level }
+    Games,
     topic,
     questionCount,
     createdAt: Date.now(),
@@ -155,12 +157,13 @@ export const deleteTempTeam = async (tempTeamId) => {
 // ─────────────────────────────────────────────
 
 export const createGameSession = async ({
-  gameId, topic, totalQuestions,
+  gameId, Games,topic, totalQuestions,
   teamAMembers, teamBMembers,currentTeam, // arrays of userId strings
   questionsAsked, status
 }) => {
   await redis.hset(K.gameSession(gameId), {
     gameId,
+    Games,
     topic,
     totalQuestions,
     teamAMembers: teamAMembers.join(','),  // ← FIXED: store as comma-separated
@@ -285,12 +288,13 @@ export const isGameEmpty = async (gameId) => {
 // CHALLENGE REQUESTS
 // ─────────────────────────────────────────────
 
-export const createChallengeRequest = async ({ fromUserId, toId, topic, questionCount, opponentType }) => {
+export const createChallengeRequest = async ({ fromUserId, toId,Games, topic, questionCount, opponentType }) => {
   const challengeId = uuid();
   await redis.hset(K.challengeRequest(challengeId), {
     challengeId,
     fromUserId,
     toId,
+    Games,
     topic,
     questionCount,
     opponentType,
@@ -385,4 +389,15 @@ export const removeActivePlayer = async (gameId, userId) => {
 export const setUserOffGame = async (userId) => {
   await redis.hset(`user:${userId}:online`, 'isInGame', 'false');
   await redis.hdel(`user:${userId}:online`, 'gameId');
+};
+export const addSpinVote = async (gameId, userId) => {
+  await redis.sadd(`game:${gameId}:spinvotes`, userId);
+};
+
+export const getSpinVotes = async (gameId) => {
+  return await redis.smembers(`game:${gameId}:spinvotes`);
+};
+
+export const clearSpinVotes = async (gameId) => {
+  await redis.del(`game:${gameId}:spinvotes`);
 };
