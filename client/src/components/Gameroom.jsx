@@ -480,18 +480,29 @@ const [ptsMyTurn, setPtsMyTurn] = useState(false); // true when landed player is
 
   const iceConfig = {
   iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
     {
-      urls: [
-        'turn:openrelay.metered.ca:80',
-        'turn:openrelay.metered.ca:443',
-        'turn:openrelay.metered.ca:443?transport=tcp',
-        'turns:openrelay.metered.ca:443'
-      ],
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
-    }
+        urls: "stun:stun.relay.metered.ca:80",
+      },
+      {
+        urls: "turn:global.relay.metered.ca:80",
+        username: "569ac01d036cd721daf00232",
+        credential: "1gdb87Cc+xKGQnK4",
+      },
+      {
+        urls: "turn:global.relay.metered.ca:80?transport=tcp",
+        username: "569ac01d036cd721daf00232",
+        credential: "1gdb87Cc+xKGQnK4",
+      },
+      {
+        urls: "turn:global.relay.metered.ca:443",
+        username: "569ac01d036cd721daf00232",
+        credential: "1gdb87Cc+xKGQnK4",
+      },
+      {
+        urls: "turns:global.relay.metered.ca:443?transport=tcp",
+        username: "569ac01d036cd721daf00232",
+        credential: "1gdb87Cc+xKGQnK4",
+      },
   ]
 };
 
