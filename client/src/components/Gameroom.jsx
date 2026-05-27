@@ -4,6 +4,219 @@ import axios from 'axios';
 import { BACKEND_URL } from '../config';
 // ── OUTSIDE GameRoom function — at the top of the file ──
 // ── OUTSIDE GameRoom function — at the top of the file ──
+// ─────────────────────────────────────────────
+// TRUTH & DARE WHEEL COMPONENT
+// ─────────────────────────────────────────────
+const TruthDareWheel = ({ strips, turnOrder, allPlayers, spinning, landedIndex }) => {
+  const wheelRef = useRef(null);
+  const prevSpinRef = useRef(0);
+
+  const STRIP_COUNT = 8;
+  const STRIP_ANGLE = 360 / STRIP_COUNT; // 45deg each
+
+  // Map turnNumber → player username for label
+  const getLabel = (turnNumber) => {
+    const entry = turnOrder.find(t => t.turnNumber === turnNumber);
+    if (!entry) return `#${turnNumber}`;
+    const player = allPlayers.find(p => p.userId === entry.userId);
+    return player ? player.username.slice(0, 8) : `#${turnNumber}`;
+  };
+
+  // Strip colors — alternating two tones
+  const COLORS = [
+    { bg: '#2d1b69', border: '#7c3aed', text: '#c4b5fd' },
+    { bg: '#1e1b4b', border: '#4f46e5', text: '#a5b4fc' },
+    { bg: '#3b0764', border: '#9333ea', text: '#d8b4fe' },
+    { bg: '#1a1040', border: '#6d28d9', text: '#ede9fe' },
+    { bg: '#2e1065', border: '#7c3aed', text: '#c4b5fd' },
+    { bg: '#1e1b4b', border: '#4338ca', text: '#a5b4fc' },
+    { bg: '#4a044e', border: '#a21caf', text: '#f0abfc' },
+    { bg: '#1a1040', border: '#6d28d9', text: '#ede9fe' },
+  ];
+
+  useEffect(() => {
+    if (!wheelRef.current) return;
+    if (spinning && landedIndex !== null) {
+      // Each strip is 45deg. Pointer is at top (270deg offset from 0).
+      // To land strip[landedIndex] under pointer:
+      // strip i center is at: i * 45 + 22.5 degrees from wheel's 0
+      // We need that center to be at 270deg (top) after rotation
+      // So rotation = 270 - (landedIndex * 45 + 22.5) + 360 * extraSpins
+      const extraSpins = 5; // minimum full rotations for drama
+      const targetAngle = 270 - (landedIndex * STRIP_ANGLE + STRIP_ANGLE / 2);
+      const finalRotation = prevSpinRef.current + extraSpins * 360 + ((targetAngle - prevSpinRef.current % 360 + 360) % 360);
+      
+      wheelRef.current.style.transition = 'transform 3s cubic-bezier(0.17, 0.67, 0.12, 1)';
+      wheelRef.current.style.transform = `rotate(${finalRotation}deg)`;
+      prevSpinRef.current = finalRotation;
+    }
+  }, [spinning, landedIndex]);
+
+  // Build SVG wheel — conic sectors
+  const buildSectors = () => {
+    const cx = 160, cy = 160, r = 148;
+    const sectors = [];
+
+    for (let i = 0; i < STRIP_COUNT; i++) {
+      const startAngle = i * STRIP_ANGLE - 90; // offset so 0 is at top
+      const endAngle = startAngle + STRIP_ANGLE;
+      const startRad = (startAngle * Math.PI) / 180;
+      const endRad = (endAngle * Math.PI) / 180;
+
+      const x1 = cx + r * Math.cos(startRad);
+      const y1 = cy + r * Math.sin(startRad);
+      const x2 = cx + r * Math.cos(endRad);
+      const y2 = cy + r * Math.sin(endRad);
+
+      const midAngle = startAngle + STRIP_ANGLE / 2;
+      const midRad = (midAngle * Math.PI) / 180;
+      const labelR = r * 0.68;
+      const lx = cx + labelR * Math.cos(midRad);
+      const ly = cy + labelR * Math.sin(midRad);
+
+      const col = COLORS[i % COLORS.length];
+      const turnNum = strips[i];
+
+      sectors.push(
+        <g key={i}>
+          <path
+            d={`M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 0 1 ${x2} ${y2} Z`}
+            fill={col.bg}
+            stroke={col.border}
+            strokeWidth="1.5"
+          />
+          {/* Turn number — large */}
+          <text
+            x={lx}
+            y={ly - 8}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            transform={`rotate(${midAngle + 90}, ${lx}, ${ly - 8})`}
+            fill={col.text}
+            fontSize="18"
+            fontWeight="700"
+            fontFamily="'Space Mono', monospace"
+          >
+            {turnNum}
+          </text>
+          {/* Username — small */}
+          <text
+            x={lx}
+            y={ly + 10}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            transform={`rotate(${midAngle + 90}, ${lx}, ${ly + 10})`}
+            fill={col.text}
+            fontSize="8"
+            fontWeight="400"
+            fontFamily="'Space Mono', monospace"
+            opacity="0.7"
+          >
+            {getLabel(turnNum)}
+          </text>
+        </g>
+      );
+    }
+    return sectors;
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0px', userSelect: 'none' }}>
+      {/* Pointer — fixed triangle at top */}
+      <div style={{ position: 'relative', zIndex: 10, marginBottom: '-16px' }}>
+        <svg width="32" height="28" viewBox="0 0 32 28">
+          <polygon
+            points="16,28 0,0 32,0"
+            fill="#7c3aed"
+            stroke="#a855f7"
+            strokeWidth="1.5"
+            strokeLinejoin="round"
+          />
+          <polygon
+            points="16,22 6,4 26,4"
+            fill="#a855f7"
+            opacity="0.5"
+          />
+        </svg>
+      </div>
+
+      {/* Wheel wrapper — outer glow ring */}
+      <div style={{
+        borderRadius: '50%',
+        padding: '4px',
+        background: 'conic-gradient(from 0deg, #7c3aed, #a855f7, #ec4899, #7c3aed)',
+        boxShadow: spinning ? '0 0 40px rgba(168,85,247,0.5)' : '0 0 20px rgba(168,85,247,0.2)',
+        transition: 'box-shadow 0.5s ease',
+      }}>
+        <div style={{
+          borderRadius: '50%',
+          overflow: 'hidden',
+          background: '#0a0a18',
+          width: '320px',
+          height: '320px',
+        }}>
+          <svg
+            ref={wheelRef}
+            viewBox="0 0 320 320"
+            width="320"
+            height="320"
+            style={{ display: 'block' }}
+          >
+            {/* Outer ring */}
+            <circle cx="160" cy="160" r="158" fill="none" stroke="rgba(168,85,247,0.3)" strokeWidth="2" />
+            
+            {/* Sectors */}
+            {buildSectors()}
+
+            {/* Center circle */}
+            <circle cx="160" cy="160" r="28" fill="#0f0a1e" stroke="#7c3aed" strokeWidth="2" />
+            <circle cx="160" cy="160" r="20" fill="#1a0d3d" stroke="#a855f7" strokeWidth="1" />
+            <text
+              x="160" y="160"
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fill="#a855f7"
+              fontSize="10"
+              fontWeight="700"
+              fontFamily="'Space Mono', monospace"
+            >
+              T&D
+            </text>
+
+            {/* Divider lines */}
+            {Array.from({ length: STRIP_COUNT }).map((_, i) => {
+              const angle = (i * STRIP_ANGLE - 90) * Math.PI / 180;
+              return (
+                <line
+                  key={i}
+                  x1={160 + 28 * Math.cos(angle)}
+                  y1={160 + 28 * Math.sin(angle)}
+                  x2={160 + 148 * Math.cos(angle)}
+                  y2={160 + 148 * Math.sin(angle)}
+                  stroke="rgba(168,85,247,0.25)"
+                  strokeWidth="1"
+                />
+              );
+            })}
+          </svg>
+        </div>
+      </div>
+
+      {/* Spinning status */}
+      <div style={{
+        marginTop: '16px',
+        fontFamily: "'Space Mono', monospace",
+        fontSize: '0.65rem',
+        letterSpacing: '0.14em',
+        textTransform: 'uppercase',
+        color: spinning ? '#a855f7' : 'rgba(255,255,255,0.2)',
+        transition: 'color 0.3s ease',
+      }}>
+        {spinning ? '⟳ spinning...' : 'waiting for spin'}
+      </div>
+    </div>
+  );
+};
 const StarRating = ({ playerId, questionNumber, question, existingRating, onRate }) => {
   const [hovered, setHovered] = useState(0);
   const rated = existingRating != null;
@@ -196,7 +409,7 @@ export default function GameRoom({ socket, user }) {
   const location = useLocation();
   const { gameData } = location.state || {};
 
-  // ── Game State ──
+  // ── Game discussion State ──
   const [greetPhase, setGreetPhase] = useState(true);
   const [greetTimer, setGreetTimer] = useState(30);
   const [currentQuestion, setCurrentQuestion] = useState(null);
@@ -207,6 +420,30 @@ export default function GameRoom({ socket, user }) {
   const [playersInGame, setPlayersInGame] = useState([]);
   const [gameEnded, setGameEnded] = useState(false);
 
+  //truth and dare
+  // Truth & Dare specific state
+const [ptsReady, setPtsReady] = useState(false);
+const [tdReady, setTdReady] = useState(false);
+const [tdStrips, setTdStrips] = useState([]);
+const [tdTurnOrder, setTdTurnOrder] = useState([]);
+const [chitsLeft, setChitsLeft] = useState(0);
+const [spinVotes, setSpinVotes] = useState(0);
+const [votedForSpin, setVotedForSpin] = useState(false);
+const [wheelSpinning, setWheelSpinning] = useState(false);
+const [landedIndex, setLandedIndex] = useState(null);
+const [landedUserId, setLandedUserId] = useState(null);
+const [tdPrompt, setTdPrompt] = useState(null);  // { choice, prompt }
+const [showTruthDareChoice, setShowTruthDareChoice] = useState(false); // only for landed player
+const isTruthDare = gameData?.Games === 'Truth and Dare';
+
+
+const isPassStory = gameData?.Games === 'Pass the Story';
+
+// PTS state
+const [ptsStoryLines, setPtsStoryLines] = useState([]);
+const [ptsStarter, setPtsStarter] = useState('');
+const [ptsStoryInput, setPtsStoryInput] = useState('');
+const [ptsMyTurn, setPtsMyTurn] = useState(false); // true when landed player is me
   // ── Players ──
   const [myTeam, setMyTeam] = useState(gameData?.myMembers || []);
   const [opponentTeam, setOpponentTeam] = useState(gameData?.opponentMembers || []);
@@ -328,18 +565,19 @@ const startSpeakingDetection = useCallback((stream, userId) => {
     return pc;
   }, [socket, user, gameData, startSpeakingDetection]);
 
-  // ── WebRTC: call a peer ──
+  // ── WebRTC: call a peer (always renegotiate — safe to call any time) ──
   const callPeer = useCallback(async (targetUserId) => {
     if (targetUserId === user?._id) return;
     try {
-      const existingPc = peerConnectionsRef.current[targetUserId];
-
-    // ✅ Don't re-offer if already connected!
-    if (existingPc && existingPc.signalingState !== 'stable') return;
-    if (existingPc && existingPc.connectionState === 'connected') {
-      // just replace the track instead of full renegotiation
-      return;
-    }
+      // Close stale connection so we start fresh with the current stream
+      const existing = peerConnectionsRef.current[targetUserId];
+      if (existing) {
+        const { signalingState, connectionState } = existing;
+        // If already in a clean connected state and we're not renegotiating, skip
+        if (signalingState === 'stable' && connectionState === 'connected') return;
+        // If mid-negotiation, don't interrupt
+        if (signalingState !== 'stable' && signalingState !== 'closed') return;
+      }
       const pc = createPeerConnection(targetUserId);
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
@@ -351,75 +589,136 @@ const startSpeakingDetection = useCallback((stream, userId) => {
     } catch (e) { console.error('callPeer error:', e); }
   }, [createPeerConnection, socket, user, gameData]);
 
-  // ── Start local media ──
+  // ── Force renegotiation with all peers (called after track changes) ──
+  const renegotiateAll = useCallback(async () => {
+    const others = allPlayers.filter(p => p.userId !== user._id).map(p => p.userId);
+    for (const targetUserId of others) {
+      try {
+        const pc = peerConnectionsRef.current[targetUserId];
+        if (!pc || pc.signalingState === 'closed') {
+          // No connection yet — do a full callPeer
+          await callPeer(targetUserId);
+          continue;
+        }
+        // Connection exists — create a new offer to renegotiate with updated tracks
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        socket?.emit('webrtc:offer', {
+          offer, targetUserId,
+          fromUserId: user._id,
+          gameId: gameData?.gameId,
+        });
+      } catch (e) { console.error('renegotiateAll error for', targetUserId, e); }
+    }
+  }, [allPlayers, callPeer, socket, user, gameData]);
+
+  // ── Start or update local media tracks ──
+  // withVideo / withAudio = what we WANT after this call
   const startLocalMedia = useCallback(async (withVideo, withAudio) => {
     try {
+      // Stop all existing tracks cleanly before requesting new ones
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach(t => t.stop());
+        localStreamRef.current = null;
       }
+
       const stream = await navigator.mediaDevices.getUserMedia({
         video: withVideo,
         audio: withAudio,
       });
       localStreamRef.current = stream;
 
-      if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+      if (withVideo && localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+      }
       startSpeakingDetection(stream, user._id);
 
-      // Update existing peer connections
-      Object.entries(peerConnectionsRef.current).forEach(([, pc]) => {
-        stream.getTracks().forEach(track => {
-          const sender = pc.getSenders().find(s => s.track?.kind === track.kind);
-          if (sender) sender.replaceTrack(track);
-          else pc.addTrack(track, stream);
-        });
-      });
+      // Push updated tracks into every existing peer connection.
+      // replaceTrack handles audio (sender already exists from a previous call).
+      // For video: if no sender exists yet, addTrack — then renegotiate so the
+      // remote side learns about the new track.
+      let needsRenegotiation = false;
+      Object.values(peerConnectionsRef.current).forEach(pc => {
+  if (pc.signalingState === 'closed') return;
+  stream.getTracks().forEach(track => {
+    const sender = pc.getSenders().find(s => s.track?.kind === track.kind);
+    if (sender && track.kind === 'audio') {
+      // Audio: replaceTrack is fine, no renegotiation needed
+      sender.replaceTrack(track);
+    } else if (sender && track.kind === 'video') {
+      // ✅ Remove + re-add video so remote ontrack fires again
+      pc.removeTrack(sender);
+      pc.addTrack(track, stream);
+      needsRenegotiation = true;
+    } else {
+      pc.addTrack(track, stream);
+      needsRenegotiation = true;
+    }
+  });
+});
 
-      return stream;
+      return { stream, needsRenegotiation };
     } catch (e) {
       notify('Could not access camera/microphone', 'error');
       throw e;
     }
   }, [user, startSpeakingDetection]);
 
-  // ── Toggle video ──
-  const handleToggleVideo = async () => {
-    try {
-      if (!videoEnabled) {
-        await startLocalMedia(true, true);
-        setVideoEnabled(true);
-        setVoiceEnabled(true);
-        const others = allPlayers.filter(p => p.userId !== user._id).map(p => p.userId);
-        for (const id of others) await callPeer(id);
-        // ✅ Tell others video is ON
-        socket?.emit('webrtc:videoToggle', {
-          gameId: gameData?.gameId,
-          userId: user._id,
-          videoEnabled: true,
-        });
-      } else {
-        localStreamRef.current?.getVideoTracks().forEach(t => { t.stop(); t.enabled = false; });
-        if (localVideoRef.current) localVideoRef.current.srcObject = null;
-        setVideoEnabled(false);
-        // ✅ Tell others video is OFF
-        socket?.emit('webrtc:videoToggle', {
-          gameId: gameData?.gameId,
-          userId: user._id,
-          videoEnabled: false,
-        });
-      }
-    } catch (e) { console.error('toggleVideo error:', e); }
-  };
+  // ── Toggle video — independent of audio ──
 
-  // ── Toggle voice ──
+const handleToggleVideo = async () => {
+  try {
+    if (!videoEnabled) {
+      const currentAudio = voiceEnabled;
+      await startLocalMedia(true, currentAudio);
+      setVideoEnabled(true);
+      socket?.emit('webrtc:videoToggle', {
+        gameId: gameData?.gameId, userId: user._id, videoEnabled: true,
+      });
+      // ✅ Wait for replaceTrack to settle before renegotiating
+      await new Promise(r => setTimeout(r, 100));
+      await renegotiateAll();
+    } else {
+      // Turn video OFF
+      // ✅ Remove video senders from all PCs before stopping tracks
+      Object.values(peerConnectionsRef.current).forEach(pc => {
+        if (pc.signalingState === 'closed') return;
+        pc.getSenders()
+          .filter(s => s.track?.kind === 'video')
+          .forEach(s => {
+            try { pc.removeTrack(s); } catch (e) {}
+          });
+      });
+
+      localStreamRef.current?.getVideoTracks().forEach(t => t.stop());
+      if (localVideoRef.current) localVideoRef.current.srcObject = null;
+
+      if (voiceEnabled) {
+        await startLocalMedia(false, true);
+      } else {
+        localStreamRef.current = null;
+      }
+
+      setVideoEnabled(false);
+      socket?.emit('webrtc:videoToggle', {
+        gameId: gameData?.gameId, userId: user._id, videoEnabled: false,
+      });
+      await renegotiateAll();
+    }
+  } catch (e) { console.error('toggleVideo error:', e); }
+};
+
+  // ── Toggle voice — independent of video ──
   const handleToggleVoice = async () => {
     try {
       if (!voiceEnabled) {
-        await startLocalMedia(videoEnabled, true);
+        // Turn mic ON. Keep current video state — don't touch camera.
+        const currentVideo = videoEnabled;
+        await startLocalMedia(currentVideo, true);
         setVoiceEnabled(true);
-        const others = allPlayers.filter(p => p.userId !== user._id).map(p => p.userId);
-        for (const id of others) await callPeer(id);
+        await renegotiateAll();
       } else {
+        // Turn mic OFF — just disable the audio tracks (don't stop them)
         localStreamRef.current?.getAudioTracks().forEach(t => { t.enabled = false; });
         setVoiceEnabled(false);
       }
@@ -435,7 +734,11 @@ const startSpeakingDetection = useCallback((stream, userId) => {
 
     socket.on('game:playerJoined', ({ userId, activePlayers }) => {
       setPlayersInGame(activePlayers);
-      if (localStreamRef.current && userId !== user._id) callPeer(userId);
+      if (userId === user._id) return;
+      // Always initiate a peer connection when someone joins, even without local media.
+      // createPeerConnection sets up ontrack so we receive their stream regardless of
+      // whether we have a local stream ourselves.
+      callPeer(userId);
     });
 
 
@@ -475,18 +778,32 @@ const startSpeakingDetection = useCallback((stream, userId) => {
 
     // WebRTC signaling
     socket.on('webrtc:offer', async ({ offer, fromUserId }) => {
-      const pc = createPeerConnection(fromUserId);
-      if (pc.signalingState !== 'stable') {
-    console.warn('Ignoring offer — signalingState:', pc.signalingState);
-    return;
-  }
-      await pc.setRemoteDescription(new RTCSessionDescription(offer));
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      socket.emit('webrtc:answer', {
-        answer, targetUserId: fromUserId,
-        fromUserId: user._id, gameId: gameData.gameId,
-      });
+      try {
+        const pc = createPeerConnection(fromUserId);
+
+        // If we're in the middle of our own offer (have-local-offer), we have a
+        // collision. Resolve by whichever userId is lexicographically smaller
+        // becoming the "polite" peer that rolls back and accepts the remote offer.
+        if (pc.signalingState === 'have-local-offer') {
+          const isPolite = user._id < fromUserId;
+          if (!isPolite) {
+            console.warn('Offer collision — we are impolite, ignoring remote offer');
+            return;
+          }
+          // Polite peer: roll back our local offer and accept the remote one
+          await pc.setLocalDescription({ type: 'rollback' });
+        }
+
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        socket.emit('webrtc:answer', {
+          answer, targetUserId: fromUserId,
+          fromUserId: user._id, gameId: gameData.gameId,
+        });
+      } catch (e) {
+        console.error('webrtc:offer handler error:', e);
+      }
     });
 
     socket.on('webrtc:answer', async ({ answer, fromUserId }) => {
@@ -514,6 +831,63 @@ const startSpeakingDetection = useCallback((stream, userId) => {
         return { ...prev };
       });
     });
+    socket.on('game:tdReady', ({ turnOrder, strips, chitsLeft }) => {
+  setTdTurnOrder(turnOrder);
+  setTdStrips(strips);
+  setChitsLeft(chitsLeft);
+  setTdReady(true);
+});
+// ── PASS THE STORY ──
+socket.on('game:ptsReady', ({ turnOrder, strips, chitsLeft, storyStarter, storyLines }) => {
+  setTdTurnOrder(turnOrder);
+  setTdStrips(strips);
+  setChitsLeft(chitsLeft);
+  setPtsStarter(storyStarter);
+  // Use full storyLines if provided (late joiner), else start fresh
+  setPtsStoryLines(storyLines?.length ? storyLines : [storyStarter]);
+  setPtsReady(true);
+});
+
+socket.on('game:ptsNewLine', ({ userId, line, storyLines }) => {
+  setPtsStoryLines(storyLines);
+  setPtsMyTurn(false);        // safe for everyone — non-landed players already have it false
+  setPtsStoryInput('');       // safe for everyone — others have empty input anyway
+  setLandedUserId(null);      // ← this is the key one, must run for ALL players
+});
+
+socket.on('game:spinVoteUpdate', ({ votes, required }) => {
+  setSpinVotes(votes);
+});
+
+socket.on('game:wheelResult', ({ landedIndex, landedUserId }) => {
+  setWheelSpinning(true);
+  setLandedIndex(landedIndex);
+  setTimeout(() => {
+    setWheelSpinning(false);
+    setLandedUserId(landedUserId);
+    setVotedForSpin(false);
+    setSpinVotes(0);
+    if (landedUserId === myUserId) {
+      if (isTruthDare) {
+        setShowTruthDareChoice(true);
+      } else if (isPassStory) {
+        setPtsMyTurn(true);  // ← show story input instead of T/D choice
+      }
+    }
+  }, 3000);
+});
+
+socket.on('game:tdPrompt', ({ userId, choice, prompt }) => {
+  setShowTruthDareChoice(false);
+  setTdPrompt({ userId, choice, prompt });
+});
+
+socket.on('game:readyToSpin', ({ chitsLeft }) => {
+  setChitsLeft(chitsLeft);
+  setTdPrompt(null);
+  setLandedUserId(null);
+  setLandedIndex(null);
+});
 
     return () => {
       socket.off('game:playerJoined');
@@ -526,6 +900,13 @@ const startSpeakingDetection = useCallback((stream, userId) => {
       socket.off('webrtc:answer');
       socket.off('webrtc:ice');
       socket.off('webrtc:videoToggle'); // ✅
+      socket.off('game:tdReady');
+      socket.off('game:spinVoteUpdate');
+      socket.off('game:wheelResult');
+      socket.off('game:tdPrompt');
+      socket.off('game:readyToSpin');
+      socket.off('game:ptsReady');
+      socket.off('game:ptsNewLine');
     };
   }, [socket, gameData, user, callPeer, createPeerConnection, chatOpen]);
 
@@ -544,9 +925,15 @@ return ()=> {
   socket.off('game:greetPhase');
 };
   }, []);
+// Sync local video element whenever the stream or videoEnabled state changes.
+// This is the single source of truth for the local preview — toggle handlers
+// don't set srcObject themselves so we never get conflicts.
 useEffect(() => {
-  if (videoEnabled && localVideoRef.current && localStreamRef.current) {
+  if (!localVideoRef.current) return;
+  if (videoEnabled && localStreamRef.current) {
     localVideoRef.current.srcObject = localStreamRef.current;
+  } else {
+    localVideoRef.current.srcObject = null;
   }
 }, [videoEnabled]);
   // ── Cleanup on unmount ──
@@ -626,6 +1013,7 @@ useEffect(() => {
 
   const myUserId = user?._id;
   const totalVoters = allPlayers.length;
+  
 
   return (
     <div className="min-h-screen bg-[#070711] text-white flex flex-col overflow-hidden"
@@ -786,7 +1174,175 @@ useEffect(() => {
 
           {/* Question card */}
           <div className="w-full max-w-2xl flex-1 flex flex-col items-center justify-center gap-6">
-            {currentQuestion ? (
+          {isPassStory ? (
+  ptsReady && (
+    <div className="w-full flex flex-col items-center gap-6">
+
+      {/* Chits counter */}
+      <div className="glass px-6 py-2 rounded-full text-sm text-violet-300">
+        🎴 {chitsLeft} Rounds remaining
+      </div>
+
+      {/* THE WHEEL — reused, same component */}
+      <TruthDareWheel
+        strips={tdStrips}
+        turnOrder={tdTurnOrder}
+        allPlayers={allPlayers}
+        spinning={wheelSpinning}
+        landedIndex={landedIndex}
+      />
+
+      {/* Running story scroll */}
+      <div className="glass rounded-2xl p-4 w-full max-w-md max-h-48 overflow-y-auto flex flex-col gap-2">
+        <div className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">
+          The Story So Far
+        </div>
+        {ptsStoryLines.map((line, i) => (
+          <p key={i} className={`text-sm leading-relaxed ${
+            i === 0 ? 'text-violet-300 font-semibold' : 'text-slate-300'
+          }`}>
+            {i === 0 ? '📖 ' : `✍️ `}{line}
+          </p>
+        ))}
+      </div>
+
+      {/* Story input — only for landed player */}
+      {ptsMyTurn && (
+        <div className="w-full max-w-md flex flex-col gap-3">
+          <p className="text-center text-sm text-amber-400 font-semibold">
+            🎯 Your turn! Add the next line to the story.
+          </p>
+          <textarea
+            value={ptsStoryInput}
+            onChange={e => setPtsStoryInput(e.target.value)}
+            placeholder="Continue the story..."
+            rows={3}
+            className="w-full px-4 py-3 glass rounded-xl text-sm text-white placeholder-slate-600 outline-none resize-none border border-violet-500/30 focus:border-violet-500/60 transition-all"
+          />
+          <button
+            onClick={() => {
+              if (!ptsStoryInput.trim()) return;
+              socket.emit('game:submitStoryLine', {
+                gameId: gameData.gameId,
+                userId: myUserId,
+                line: ptsStoryInput.trim(),
+              });
+              // After submitting, signal done
+              socket.emit('game:ptsDone', { gameId: gameData.gameId });
+              setPtsMyTurn(false);
+              setPtsStoryInput('');
+            }}
+            className="px-8 py-3 bg-violet-600 hover:bg-violet-500 rounded-xl text-sm font-semibold"
+          >
+            Submit Line ✓
+          </button>
+        </div>
+      )}
+
+      {/* Spin voting — only when no one's writing */}
+      {!ptsMyTurn && !wheelSpinning && landedUserId === null && (
+        <div className="flex flex-col items-center gap-3">
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            {allPlayers.map((p, i) => (
+              <div key={i} className={`w-2 h-2 rounded-full ${
+                i < spinVotes ? 'bg-emerald-400' : 'bg-slate-700'
+              }`} />
+            ))}
+            <span>{spinVotes}/{allPlayers.length} ready</span>
+          </div>
+          <button
+            onClick={() => {
+              if (votedForSpin) return;
+              setVotedForSpin(true);
+              socket.emit('game:voteSpin', { gameId: gameData.gameId, userId: myUserId });
+            }}
+            disabled={votedForSpin}
+            className={`px-8 py-3 rounded-xl font-semibold text-sm transition-all ${
+              votedForSpin
+                ? 'bg-emerald-900/40 text-emerald-400 border border-emerald-700/40 cursor-default'
+                : 'bg-violet-600 hover:bg-violet-500 text-white'
+            }`}
+          >
+            {votedForSpin ? '✓ Ready' : '🎡 Spin'}
+          </button>
+        </div>
+      )}
+
+    </div>
+  )
+) : isTruthDare ? (
+  // ... your existing TD block unchanged{isTruthDare ? (
+  // ── TRUTH & DARE CENTER ──
+  tdReady && (
+    <div className="w-full flex flex-col items-center gap-6">
+      
+      {/* Chits counter */}
+      <div className="glass px-6 py-2 rounded-full text-sm text-violet-300">
+        🎴 {chitsLeft} Chits remaining
+      </div>
+
+      {/* THE WHEEL */}
+      <TruthDareWheel
+        strips={tdStrips}
+        turnOrder={tdTurnOrder}
+        allPlayers={allPlayers}
+        spinning={wheelSpinning}
+        landedIndex={landedIndex}
+      />
+
+      {/* Prompt display — shown to everyone after wheel lands and player picks */}
+      {tdPrompt && (
+        <div className="glass rounded-2xl p-6 text-center w-full max-w-md">
+          <div className="text-xs text-slate-600 uppercase tracking-widest mb-1">
+      {(() => {
+        const p = allPlayers.find(pl => pl.userId === landedUserId);
+        return p ? `${p.username}'s turn` : '';
+      })()}
+    </div>
+          <div className="text-xs text-slate-500 uppercase tracking-widest mb-2">
+            {tdPrompt.choice === 'truth' ? '🤍 Truth' : '🔥 Dare'}
+          </div>
+          <div className="text-xl font-display font-bold">{tdPrompt.prompt}</div>
+          {landedUserId === myUserId && (
+            <button
+              onClick={() => socket.emit('game:tdDone', { gameId: gameData.gameId })}
+              className="mt-4 px-8 py-3 bg-violet-600 hover:bg-violet-500 rounded-xl text-sm font-semibold"
+            >
+              Done ✓
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Spin voting — only shown when no prompt is active */}
+      {!tdPrompt && !wheelSpinning && (
+        <div className="flex flex-col items-center gap-3">
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            {allPlayers.map((p, i) => (
+              <div key={i} className={`w-2 h-2 rounded-full ${i < spinVotes ? 'bg-emerald-400' : 'bg-slate-700'}`} />
+            ))}
+            <span>{spinVotes}/{allPlayers.length} ready</span>
+          </div>
+          <button
+            onClick={() => {
+              if (votedForSpin) return;
+              setVotedForSpin(true);
+              socket.emit('game:voteSpin', { gameId: gameData.gameId, userId: myUserId });
+            }}
+            disabled={votedForSpin}
+            className={`px-8 py-3 rounded-xl font-semibold text-sm transition-all ${
+              votedForSpin
+                ? 'bg-emerald-900/40 text-emerald-400 border border-emerald-700/40 cursor-default'
+                : 'bg-violet-600 hover:bg-violet-500 text-white'
+            }`}
+          >
+            {votedForSpin ? '✓ Ready to Spin' : '🎡 Spin'}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+) :          (currentQuestion ? (
               <div className="w-full animate-slide-up">
                 {/* Question number */}
                 <div className="flex items-center gap-3 mb-4">
@@ -842,7 +1398,8 @@ useEffect(() => {
                 </p>
                 <p className="text-slate-600 text-sm mt-2">AI is preparing your discussion topic</p>
               </div>
-            )}
+           ) 
+           )}
           </div>
 
           {/* Bottom spacer */}
@@ -1010,7 +1567,72 @@ useEffect(() => {
           </div>
         </div>
       )}
+    {/* ── TRUTH & DARE CHOICE MODAL — only shown to landed player ── */}
+{showTruthDareChoice && (
+  <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center animate-fade">
+    <div className="glass rounded-2xl p-8 max-w-sm w-full mx-4 text-center"
+      style={{ border: '1px solid rgba(168,85,247,0.3)', boxShadow: '0 0 60px rgba(168,85,247,0.15)' }}>
+      
+      {/* Header */}
+      <div className="text-4xl mb-3">🎯</div>
+      <h3 className="font-display text-2xl font-bold mb-1" style={{
+        background: 'linear-gradient(135deg, #fff, #a855f7)',
+        WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'
+      }}>
+        Your Turn!
+      </h3>
+      <p className="text-slate-400 text-sm mb-8">The wheel landed on you. Choose wisely.</p>
 
+      <div className="flex gap-4">
+        {/* TRUTH */}
+        <button
+          onClick={() => {
+            setShowTruthDareChoice(false);
+            socket.emit('game:chooseTruthOrDare', {
+              gameId: gameData.gameId,
+              userId: myUserId,
+              choice: 'truth',
+            });
+          }}
+          className="flex-1 py-5 rounded-2xl font-display font-bold text-lg transition-all hover:scale-[1.03] active:scale-[0.97]"
+          style={{
+            background: 'rgba(56,189,248,0.1)',
+            border: '1px solid rgba(56,189,248,0.3)',
+            color: '#38bdf8',
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = 'rgba(56,189,248,0.2)'}
+          onMouseLeave={e => e.currentTarget.style.background = 'rgba(56,189,248,0.1)'}
+        >
+          🤍 Truth
+          <p className="text-xs font-normal text-slate-400 mt-1">Answer honestly</p>
+        </button>
+
+        {/* DARE */}
+        <button
+          onClick={() => {
+            setShowTruthDareChoice(false);
+            socket.emit('game:chooseTruthOrDare', {
+              gameId: gameData.gameId,
+              userId: myUserId,
+              choice: 'dare',
+            });
+          }}
+          className="flex-1 py-5 rounded-2xl font-display font-bold text-lg transition-all hover:scale-[1.03] active:scale-[0.97]"
+          style={{
+            background: 'rgba(236,72,153,0.1)',
+            border: '1px solid rgba(236,72,153,0.3)',
+            color: '#ec4899',
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = 'rgba(236,72,153,0.2)'}
+          onMouseLeave={e => e.currentTarget.style.background = 'rgba(236,72,153,0.1)'}
+        >
+          🔥 Dare
+          <p className="text-xs font-normal text-slate-400 mt-1">Accept the challenge</p>
+        </button>
+      </div>
+    </div>
+  </div>
+)}
       {/* ── LEAVE CONFIRM ── */}
       {showLeaveConfirm && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center animate-fade"

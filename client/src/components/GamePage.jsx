@@ -35,6 +35,7 @@ export default function GamePage({ socket, user }) {
   const [isQueuing, setIsQueuing] = useState(false);
 
   const [soloQueueData, setSoloQueueData] = useState({
+    Games: 'Discussion',
     topic: '',
     questionCount: 10,
     playerCount: 1,
@@ -42,14 +43,18 @@ export default function GamePage({ socket, user }) {
   });
 
   const { aiTopics, loading: topicsLoading } = useTrendingTopics();
-
+const Genre = [
+  "Horror",
+  "Comedy",
+  "Sci-Fi",
+  "Rom-Com",
+  "Family Drama",
+  "Action",
+  "Thriller"
+];
   const handleSoloQueue = () => {
     if (!socket) {
       alert('Not connected to server!');
-      return;
-    }
-    if (!soloQueueData.topic) {
-      alert('Please select a topic');
       return;
     }
     setIsQueuing(true);
@@ -63,6 +68,7 @@ export default function GamePage({ socket, user }) {
       username: user.username,
       level: user.level ?? 1,
       playerClass: user.class,
+      Games: soloQueueData.Games,
       topic: soloQueueData.topic,
       questionCount: soloQueueData.questionCount,
       playerCount: soloQueueData.playerCount,
@@ -314,7 +320,7 @@ export default function GamePage({ socket, user }) {
             </h1>
           </div>
           <button
-            onClick={() => navigate('/dashboard')}
+            onClick={() => navigate('/')}
             className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm transition-all hover:scale-[1.03]"
             style={{
               fontFamily: "'Space Mono', monospace",
@@ -426,8 +432,37 @@ export default function GamePage({ socket, user }) {
               </div>
 
               <div className="space-y-5">
-
-                {/* Topic — AI-powered trending topics from GNews + Gemini */}
+          <div>
+              <label className="gp-label">
+              <span>*</span> Games
+              {/* Badge showing this is AI-generated */}
+              <span style={{
+                marginLeft: '0.5rem',
+                padding: '0.1rem 0.5rem',
+                borderRadius: '6px',
+                background: 'rgba(168,85,247,0.15)',
+                border: '1px solid rgba(168,85,247,0.3)',
+                color: 'rgba(168,85,247,0.8)',
+                fontSize: '0.55rem',
+                letterSpacing: '0.08em',
+                verticalAlign: 'middle',
+              }}>✦ What you wanna play now</span>
+              
+            </label>
+            <div className="flex  gap-2">
+             {['Discussion', 'Quizz', 'Truth and Dare', 'Pass the Story'].map(mode => (
+               <button
+                 key={mode}
+                 onClick={() => setSoloQueueData({ ...soloQueueData, Games: mode })}
+                 className={`gp-pill-btn ${soloQueueData.Games === mode ? 'active' : ''}`}
+               >
+                 {mode}
+               </button>
+             ))}
+           </div>
+         </div>
+       {soloQueueData.Games !== 'Truth and Dare' && (
+               
                 <div>
                   <label className="gp-label">
                     <span>*</span> Topic
@@ -451,20 +486,34 @@ export default function GamePage({ socket, user }) {
                     className="gp-select"
                     disabled={topicsLoading}
                   >
-                    {topicsLoading ? (
-                      <option value="">⏳ Loading today's topics...</option>
-                    ) : aiTopics.length === 0 ? (
-                      <option value="">No topics available right now</option>
-                    ) : (
-                      <>
-                        <option value="">Select a topic</option>
-                        {aiTopics.map(t => (
-                          <option key={t.category} value={t.category}>
-                            {t.emoji ? `${t.emoji} ${t.category}` : t.category}
-                          </option>
-                        ))}
-                      </>
-                    )}
+                  
+                   {soloQueueData.Games === 'Discussion' || soloQueueData.Games === 'Quizz' ? (
+                       // AI trending topics
+                     topicsLoading ? (
+                       <option value="">⏳ Loading today's topics...</option>
+                     ) : aiTopics.length === 0 ? (
+                       <option value="">No topics available right now</option>
+                     ) : (
+                       <>
+                         <option value="">Select a topic</option>
+                         {aiTopics.map(t => (
+                           <option key={t.category} value={t.category}>
+                             {t.emoji ? `${t.emoji} ${t.category}` : t.category}
+                           </option>
+                         ))}
+                       </>
+                     )
+                   ) : soloQueueData.Games === 'Pass the Story' ? (
+                     <>
+                       <option value="">Select a category</option>
+                       {Genre.map(item => (
+                         <option key={item} value={item}>{item}</option>
+                       ))}
+                     </>
+                   ) 
+                   : (
+                     <option value="">Select a game mode first</option>
+                   )} 
                   </select>
 
                   {/* Show the matched topic description as a hint */}
@@ -477,7 +526,7 @@ export default function GamePage({ socket, user }) {
                     ) : null;
                   })()}
                 </div>
-
+              )}
                 {/* Player Count */}
                 <div>
                   <label className="gp-label"><span>*</span> Team Size</label>
@@ -516,13 +565,19 @@ export default function GamePage({ socket, user }) {
 
                 {/* Question Count */}
                 <div>
-                  <label className="gp-label"><span>*</span> Questions</label>
+                  <label className="gp-label">
+  <span>*</span> {soloQueueData.Games === 'Discussion' || soloQueueData.Games === 'Quizz' ? 'Questions' : 'Chits'}
+</label>
                   <select
                     value={soloQueueData.questionCount}
                     onChange={(e) => setSoloQueueData({ ...soloQueueData, questionCount: parseInt(e.target.value) })}
                     className="gp-select"
                   >
-                    {[5, 10, 15, 20].map(n => <option key={n} value={n}>{n} Questions</option>)}
+                   {[5, 10, 15, 20].map(n => (
+  <option key={n} value={n}>
+    {n} {soloQueueData.Games === 'Discussion' || soloQueueData.Games === 'Quizz' ? 'Questions' : 'Chits'}
+  </option>
+))}
                   </select>
                 </div>
 
@@ -532,7 +587,7 @@ export default function GamePage({ socket, user }) {
                 {/* Submit */}
                 <button
                   onClick={handleSoloQueue}
-                  disabled={!socket || !user || !soloQueueData.topic || isQueuing || topicsLoading}
+                  disabled={!socket || !user ||(soloQueueData.Games !== 'Truth and Dare' && !soloQueueData.topic)  || isQueuing || topicsLoading}
                   className="gp-submit-btn"
                 >
                   {!user ? 'Loading...' : isQueuing ? '⏳ Searching...' : '⚡ Find Match'}

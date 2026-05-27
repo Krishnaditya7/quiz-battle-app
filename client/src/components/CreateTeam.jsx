@@ -3,6 +3,21 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { BACKEND_URL } from '../config';
 
+function useTrendingTopics() {
+  const [aiTopics, setAiTopics] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    axios.get(`${BACKEND_URL}/api/topics/gettopic`)
+      .then(res => {
+        if (res.data.success) setAiTopics(res.data.topics || []);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  return { aiTopics, loading };
+}
 export default function TeamManagementModal({ show, onClose, socket, user}) {
   const [myTeams, setMyTeams] = useState([]);
   const [selectedTeam, setSelectedTeam] = useState(null);
@@ -27,11 +42,23 @@ export default function TeamManagementModal({ show, onClose, socket, user}) {
 
   const [queueData, setQueueData] = useState({
     topic: '',
+    Games: 'Discussion',
     questionCount: 10,
     playerCount: 4,
     opponentType: 'squad',
     topicCategory: 'learning',
   });
+    const { aiTopics, loading: topicsLoading } = useTrendingTopics();
+
+const Genre = [
+  "Horror",
+  "Comedy",
+  "Sci-Fi",
+  "Rom-Com",
+  "Family Drama",
+  "Action",
+  "Thriller"
+];
   const scrollToBottom = () => {
   messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
 };
@@ -208,8 +235,6 @@ const formatDate = (dateStr) => {
 };
   const [inviteUserId, setInviteUserId] = useState('');
 
-  const topics = ['Math', 'Science', 'Physics', 'Chemistry', 'Biology', 'History', 'Geography'];
-
   useEffect(() => {
     if (show) {
       fetchMyTeams();
@@ -252,11 +277,6 @@ const formatDate = (dateStr) => {
       return;
     }
 
-    if (!queueData.topic) {
-      alert('Please select topic');
-      return;
-    }
-
     try {
       // Step 1 — set current team via REST (still needed so backend knows which team)
       await axios.post(
@@ -278,6 +298,7 @@ const formatDate = (dateStr) => {
         username: user.username,
         level: user.level ?? 1,
         playerClass: user.class,
+        Games:queueData.Games,
         topic: queueData.topic,
         questionCount: queueData.questionCount,
         playerCount: queueData.playerCount,
@@ -582,7 +603,7 @@ const handleInvite = async () => {
                 <div>
                   <label className="text-sm text-slate-400 mb-2 block">Topics</label>
                   <div className="flex flex-wrap gap-2">
-                    {topics.map(t => (
+                    {topic.map(t => (
                       <button
                         key={t}
                         onClick={() => {
@@ -871,16 +892,100 @@ const handleInvite = async () => {
               <h3 className="text-3xl font-black text-purple-300 mb-6">START GAME</h3>
               
               <div className="space-y-4">
-                {/* Topic */}
-                <select
-                  value={queueData.topic}
-                  onChange={(e) => setQueueData({...queueData, topic: e.target.value})}
-                  className="w-full px-4 py-3 bg-slate-800 rounded-xl text-white"
-                >
-                  <option value="">Select Topic</option>
-                  {selectedTeam.topics?.map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
+            <div>    <label className="gp-label">
+          <span>*</span> Games
+          {/* Badge showing this is AI-generated */}
+          <span style={{
+            marginLeft: '0.5rem',
+            padding: '0.1rem 0.5rem',
+            borderRadius: '6px',
+            background: 'rgba(168,85,247,0.15)',
+            border: '1px solid rgba(168,85,247,0.3)',
+            color: 'rgba(168,85,247,0.8)',
+            fontSize: '0.55rem',
+            letterSpacing: '0.08em',
+            verticalAlign: 'middle',
+          }}>✦ What you wanna play now</span>
+          
+        </label>
+        <div className="flex  gap-2">
+         {['Discussion', 'Quizz', 'Truth and Dare', 'Pass the Story'].map(mode => (
+           <button
+             key={mode}
+             onClick={() => setQueueData({ ...queueData, Games: mode })}
+             className={`gp-pill-btn ${queueData.Games === mode ? 'active' : ''}`}
+           >
+             {mode}
+           </button>
+         ))}
+       </div>
+     </div>
+            {queueData.Games !== 'Truth and Dare' && (
+               
+                <div>
+                  <label className="gp-label">
+                    <span>*</span> Topic
+                    {/* Badge showing this is AI-generated */}
+                    <span style={{
+                      marginLeft: '0.5rem',
+                      padding: '0.1rem 0.5rem',
+                      borderRadius: '6px',
+                      background: 'rgba(168,85,247,0.15)',
+                      border: '1px solid rgba(168,85,247,0.3)',
+                      color: 'rgba(168,85,247,0.8)',
+                      fontSize: '0.55rem',
+                      letterSpacing: '0.08em',
+                      verticalAlign: 'middle',
+                    }}>✦ AI · TODAY</span>
+                  </label>
 
+                  <select
+                    value={queueData.topic}
+                    onChange={(e) => setQueueData({ ...queueData, topic: e.target.value })}
+                    className="gp-select"
+                    disabled={topicsLoading}
+                  >
+                  
+                   {queueData.Games === 'Discussion' || queueData.Games === 'Quizz' ? (
+                       // AI trending topics
+                     topicsLoading ? (
+                       <option value="">⏳ Loading today's topics...</option>
+                     ) : aiTopics.length === 0 ? (
+                       <option value="">No topics available right now</option>
+                     ) : (
+                       <>
+                         <option value="">Select a topic</option>
+                         {aiTopics.map(t => (
+                           <option key={t.category} value={t.category}>
+                             {t.emoji ? `${t.emoji} ${t.category}` : t.category}
+                           </option>
+                         ))}
+                       </>
+                     )
+                   ) : queueData.Games === 'Pass the Story' ? (
+                     <>
+                       <option value="">Select a category</option>
+                       {Genre.map(item => (
+                         <option key={item} value={item}>{item}</option>
+                       ))}
+                     </>
+                   ) 
+                   : (
+                     <option value="">Select a game mode first</option>
+                   )} 
+                  </select>
+
+                  {/* Show the matched topic description as a hint */}
+                  {queueData.topic && (() => {
+                    const matched = aiTopics.find(t => t.category === queueData.topic);
+                    return matched ? (
+                      <p style={{ fontFamily: "'Space Mono', monospace", fontSize: '0.62rem', color: 'rgba(168,85,247,0.6)', marginTop: '0.4rem' }}>
+                        → {matched.description}
+                      </p>
+                    ) : null;
+                  })()}
+                </div>
+              )}
 
                 {/* Player Count */}
                 <div>
@@ -920,7 +1025,23 @@ const handleInvite = async () => {
 
                    </div>
                </div>
-
+               {/* Question Count */}
+                               <div>
+                  <label className="gp-label">
+  <span>*</span> {queueData.Games === 'Discussion' || queueData.Games === 'Quizz' ? 'Questions' : 'Chits'}
+</label>
+                  <select
+                    value={queueData.questionCount}
+                    onChange={(e) => setQueueData({ ...queueData, questionCount: parseInt(e.target.value) })}
+                    className="gp-select"
+                  >
+                   {[5, 10, 15, 20].map(n => (
+  <option key={n} value={n}>
+    {n} {queueData.Games === 'Discussion' || queueData.Games === 'Quizz' ? 'Questions' : 'Chits'}
+  </option>
+))}
+                  </select>
+                </div>
 
                 <div className="flex gap-3 mt-6">
                   <button

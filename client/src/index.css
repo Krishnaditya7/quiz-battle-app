@@ -15,6 +15,10 @@
 }
 
 /* Scale In Animation */
+@keyframes wheel-glow {
+  0%, 100% { box-shadow: 0 0 20px rgba(168,85,247,0.2); }
+  50% { box-shadow: 0 0 50px rgba(168,85,247,0.6); }
+}
 @keyframes scaleIn {
   from {
     transform: scale(0.9);
