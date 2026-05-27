@@ -544,12 +544,17 @@ const startSpeakingDetection = useCallback((stream, userId) => {
         pc.addTrack(track, localStreamRef.current);
       });
     }
-   pc.onicecandidate = (event) => {
+    pc.onicecandidate = (event) => {
   if (event.candidate) {
     console.log('🧊 ICE candidate:', event.candidate.type, event.candidate.candidate);
     if (socket) {
       socket.emit('webrtc:ice', {
-        candidate: event.candidate,
+        candidate: {
+          candidate: event.candidate.candidate,
+          sdpMid: event.candidate.sdpMid,
+          sdpMLineIndex: event.candidate.sdpMLineIndex,
+          usernameFragment: event.candidate.usernameFragment,
+        },
         targetUserId,
         fromUserId: user._id,
         gameId: gameData?.gameId,

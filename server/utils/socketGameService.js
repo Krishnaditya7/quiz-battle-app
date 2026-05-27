@@ -995,9 +995,18 @@ socket.on('game:tdDone', async ({ gameId }) => {
       socket.on('webrtc:answer', ({ answer, targetUserId, fromUserId }) => {
         io.to(`user:${targetUserId}`).emit('webrtc:answer', { answer, fromUserId });
       });
-      socket.on('webrtc:ice', ({ candidate, targetUserId, fromUserId }) => {
-        io.to(`user:${targetUserId}`).emit('webrtc:ice', { candidate, fromUserId });
-      });
+      socket.on('webrtc:ice', ({ candidate, targetUserId, fromUserId, gameId }) => {
+  // Serialize the full candidate object explicitly
+  io.to(`user:${targetUserId}`).emit('webrtc:ice', { 
+    candidate: {
+      candidate: candidate.candidate,
+      sdpMid: candidate.sdpMid,
+      sdpMLineIndex: candidate.sdpMLineIndex,
+      usernameFragment: candidate.usernameFragment,
+    }, 
+    fromUserId 
+  });
+});
     });
 };
 
