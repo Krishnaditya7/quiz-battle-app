@@ -549,17 +549,40 @@ const startSpeakingDetection = useCallback((stream, userId) => {
         pc.addTrack(track, localStreamRef.current);
       });
     }
+   pc.onicecandidate = (event) => {
+  if (event.candidate) {
+    console.log('🧊 ICE candidate:', event.candidate.type, event.candidate.candidate);
+    if (socket) {
+      socket.emit('webrtc:ice', {
+        candidate: event.candidate,
+        targetUserId,
+        fromUserId: user._id,
+        gameId: gameData?.gameId,
+      });
+    }
+  } else {
+    console.log('🧊 ICE gathering complete');
+  }
+};
 
-    pc.onicecandidate = (event) => {
-      if (event.candidate && socket) {
-        socket.emit('webrtc:ice', {
-          candidate: event.candidate,
-          targetUserId,
-          fromUserId: user._id,
-          gameId: gameData?.gameId,
-        });
-      }
-    };
+pc.onconnectionstatechange = () => {
+  console.log('🔌 Connection state:', pc.connectionState);
+  if (['failed', 'disconnected', 'closed'].includes(pc.connectionState)) {
+    pc.close();
+    delete peerConnectionsRef.current[targetUserId];
+    setRemoteStreams(prev => {
+      const u = { ...prev }; delete u[targetUserId]; return u;
+    });
+  }
+};
+
+pc.onicegatheringstatechange = () => {
+  console.log('🧊 Gathering state:', pc.iceGatheringState);
+};
+
+pc.onsignalingstatechange = () => {
+  console.log('📡 Signaling state:', pc.signalingState);
+};
 
     pc.ontrack = (event) => {
       const stream = event.streams[0];
