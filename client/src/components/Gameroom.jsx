@@ -450,6 +450,7 @@ const [ptsMyTurn, setPtsMyTurn] = useState(false); // true when landed player is
   const allPlayers = [...myTeam, ...opponentTeam];
 
   // ── WebRTC ──
+  const iceCandidateQueues = useRef({});
   const localStreamRef = useRef(null);
   const peerConnectionsRef = useRef({});
   const localVideoRef = useRef(null);
@@ -810,47 +811,97 @@ const handleToggleVideo = async () => {
     });
 
     // WebRTC signaling
-    socket.on('webrtc:offer', async ({ offer, fromUserId }) => {
+     socket.on('webrtc:offer', async ({ offer, fromUserId }) => {
+  try {
+    const pc = createPeerConnection(fromUserId);
+
+    if (pc.signalingState === 'have-local-offer') {
+      const isPolite = user._id < fromUserId;
+      if (!isPolite) return;
+      await pc.setLocalDescription({ type: 'rollback' });
+    }
+
+    await pc.setRemoteDescription(new RTCSessionDescription(offer));
+    
+    // Flush queued candidates
+    const queued = iceCandidateQueues.current[fromUserId] || [];
+    console.log(`🧊 Flushing ${queued.length} queued candidates after offer for`, fromUserId);
+    for (const candidate of queued) {
       try {
-        const pc = createPeerConnection(fromUserId);
-
-        // If we're in the middle of our own offer (have-local-offer), we have a
-        // collision. Resolve by whichever userId is lexicographically smaller
-        // becoming the "polite" peer that rolls back and accepts the remote offer.
-        if (pc.signalingState === 'have-local-offer') {
-          const isPolite = user._id < fromUserId;
-          if (!isPolite) {
-            console.warn('Offer collision — we are impolite, ignoring remote offer');
-            return;
-          }
-          // Polite peer: roll back our local offer and accept the remote one
-          await pc.setLocalDescription({ type: 'rollback' });
-        }
-
-        await pc.setRemoteDescription(new RTCSessionDescription(offer));
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        socket.emit('webrtc:answer', {
-          answer, targetUserId: fromUserId,
-          fromUserId: user._id, gameId: gameData.gameId,
-        });
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
       } catch (e) {
-        console.error('webrtc:offer handler error:', e);
+        console.warn('Flush ICE error:', e);
       }
+    }
+    delete iceCandidateQueues.current[fromUserId];
+
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    socket.emit('webrtc:answer', {
+      answer, targetUserId: fromUserId,
+      fromUserId: user._id, gameId: gameData.gameId,
     });
+  } catch (e) {
+    console.error('webrtc:offer handler error:', e);
+  }
+});
 
     socket.on('webrtc:answer', async ({ answer, fromUserId }) => {
-      const pc = peerConnectionsRef.current[fromUserId];
-      if (pc) await pc.setRemoteDescription(new RTCSessionDescription(answer));
-    });
-
-    socket.on('webrtc:ice', async ({ candidate, fromUserId }) => {
-      const pc = peerConnectionsRef.current[fromUserId];
-      if (pc) {
-        try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); }
-        catch (e) { console.warn('ICE error:', e); }
+  const pc = peerConnectionsRef.current[fromUserId];
+  if (!pc) return;
+  
+  try {
+    await pc.setRemoteDescription(new RTCSessionDescription(answer));
+    console.log('✅ Remote description set for', fromUserId);
+    
+    // Flush any queued ICE candidates
+    const queued = iceCandidateQueues.current[fromUserId] || [];
+    console.log(`🧊 Flushing ${queued.length} queued candidates for`, fromUserId);
+    for (const candidate of queued) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        console.log('🧊 Flushed candidate type:', candidate.type);
+      } catch (e) {
+        console.warn('Flush ICE error:', e);
       }
-    });
+    }
+    delete iceCandidateQueues.current[fromUserId];
+  } catch (e) {
+    console.error('setRemoteDescription error:', e);
+  }
+});
+
+// Replace your webrtc:ice socket handler with this:
+socket.on('webrtc:ice', async ({ candidate, fromUserId }) => {
+  const pc = peerConnectionsRef.current[fromUserId];
+  
+  if (!pc) {
+    // PC not created yet — queue it
+    if (!iceCandidateQueues.current[fromUserId]) {
+      iceCandidateQueues.current[fromUserId] = [];
+    }
+    iceCandidateQueues.current[fromUserId].push(candidate);
+    console.log('🧊 Queued ICE candidate for', fromUserId);
+    return;
+  }
+
+  if (!pc.remoteDescription) {
+    // Remote description not set yet — queue it
+    if (!iceCandidateQueues.current[fromUserId]) {
+      iceCandidateQueues.current[fromUserId] = [];
+    }
+    iceCandidateQueues.current[fromUserId].push(candidate);
+    console.log('🧊 Queued ICE candidate (no remote desc yet) for', fromUserId);
+    return;
+  }
+
+  try {
+    await pc.addIceCandidate(new RTCIceCandidate(candidate));
+    console.log('🧊 Added ICE candidate type:', candidate.type);
+  } catch (e) {
+    console.warn('ICE add error:', e);
+  }
+});
 
     // ✅ Fix: listen for remote video toggle → update remoteVideoStates
     socket.on('webrtc:videoToggle', ({ userId, videoEnabled: isOn }) => {
